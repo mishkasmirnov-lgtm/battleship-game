@@ -1,10 +1,11 @@
-// game.js - ПОЛНЫЙ рабочий код с подключением и игровой логикой
+// game.js - ПОЛНЫЙ исправленный файл
 class BattleshipGame {
     constructor() {
         this.ws = null;
         this.playerId = null;
         this.roomId = null;
         this.playerNumber = null;
+        this.playerName = 'Игрок';
         this.gameState = 'menu';
         this.isHost = false;
         this.isYourTurn = false;
@@ -18,6 +19,16 @@ class BattleshipGame {
         this.enemyBoard = this.createEmptyBoard();
         this.specialWeapons = { bomb: 2, radar: 1 };
         this.currentWeapon = 'normal';
+        
+        // Статистика
+        this.gameStats = {
+            shots: 0,
+            hits: 0,
+            misses: 0,
+            shipsSunk: 0,
+            accuracy: 0,
+            startTime: null
+        };
         
         this.init();
     }
@@ -125,9 +136,14 @@ class BattleshipGame {
     }
 
     sendPlayerInfo() {
-        const playerName = this.isHost ? 
-            (document.getElementById('playerName')?.value || 'Игрок 1') :
-            (document.getElementById('joinPlayerName')?.value || 'Игрок 2');
+        let playerName;
+        if (this.isHost) {
+            playerName = document.getElementById('playerName')?.value || 'Игрок 1';
+        } else {
+            playerName = document.getElementById('joinPlayerName')?.value || 'Игрок 2';
+        }
+        
+        this.playerName = playerName;
         
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
@@ -203,18 +219,29 @@ class BattleshipGame {
     }
 
     handlePlayerConnected(data) {
-        console.log(`✅ Игрок ${data.playerNumber} подключился`);
-        this.showNotification(`Игрок ${data.playerNumber} подключился к комнате`, 'success');
-        this.updateStatus('Соперник найден! Начинаем игру...', 'success');
+        console.log(`✅ Игрок ${data.playerNumber} подключился: ${data.playerName}`);
         
-        // Отправляем готовность
-        setTimeout(() => {
-            if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                this.ws.send(JSON.stringify({
-                    type: 'PLAYER_READY'
-                }));
-            }
-        }, 1000);
+        // Обновляем имена игроков на экране
+        if (data.playerNumber === 1) {
+            document.getElementById('player1Name').textContent = data.playerName;
+        } else if (data.playerNumber === 2) {
+            document.getElementById('player2Name').textContent = data.playerName;
+        }
+        
+        // Если это не мы
+        if (data.playerNumber !== this.playerNumber) {
+            this.showNotification(`${data.playerName} подключился к комнате`, 'success');
+            this.updateStatus('Соперник найден! Начинаем игру...', 'success');
+            
+            // Отправляем готовность
+            setTimeout(() => {
+                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                    this.ws.send(JSON.stringify({
+                        type: 'PLAYER_READY'
+                    }));
+                }
+            }, 1000);
+        }
     }
 
     handleGameStart(data) {
@@ -240,31 +267,67 @@ class BattleshipGame {
     handleShotResult(data) {
         console.log('Результат выстрела:', data);
         
+        // Обновляем статистику
+        this.gameStats.shots++;
+        if (data.hit) {
+            this.gameStats.hits++;
+            if (data.sunk) {
+                this.gameStats.shipsSunk++;
+            }
+        } else {
+            this.gameStats.misses++;
+        }
+        
+        this.gameStats.accuracy = this.gameStats.shots > 0 ? 
+            Math.round((this.gameStats.hits / this.gameStats.shots) * 100) : 0;
+        
         // Обновляем доску
         if (data.hit) {
             this.enemyBoard[data.y][data.x] = 2; // попадание
-            this.showNotification(data.sunk ? 'Корабль потоплен!' : 'Попадание!', 'success');
+            this.showNotification(`${data.playerName}: ${data.sunk ? 'Корабль потоплен!' : 'Попадание!'}`, 'success');
+            this.playSound('hit');
+            
+            if (data.sunk) {
+                this.playSound('sunk');
+            }
         } else {
             this.enemyBoard[data.y][data.x] = 3; // промах
-            this.showNotification('Промах!', 'info');
+            this.showNotification(`${data.playerName}: Промах!`, 'info');
         }
         
         this.isYourTurn = data.nextTurn;
         this.updateGamePhase();
+        this.updateGameStats();
         this.renderGameBoards();
+        
+        // Добавляем в лог событий
+        this.addEventToLog(`${data.playerName}: ${data.hit ? 'ПОПАДАНИЕ' : 'ПРОМАХ'} в ${this.coordToString(data.x, data.y)}`);
     }
 
     handleGameOver(data) {
         console.log('Игра окончена, победитель:', data.winner);
-        this.showGameResult(data.winner === this.playerNumber ? 'win' : 'lose', data.winner);
+        const isWin = data.winner === this.playerNumber;
+        this.showGameResult(isWin ? 'win' : 'lose', data.winnerName || `Игрок ${data.winner}`);
     }
 
     handleChatMessage(data) {
-        this.addChatMessage(data.playerNumber, data.message, data.timestamp);
+        console.log('Сообщение чата:', data);
+        
+        // Определяем контекст (placement или game)
+        let messagesElement;
+        if (this.gameState === 'placing' || this.gameState === 'waiting') {
+            messagesElement = document.getElementById('placementChat');
+        } else if (this.gameState === 'playing' || this.gameState === 'finished') {
+            messagesElement = document.getElementById('gameChat');
+        }
+        
+        if (messagesElement) {
+            this.addChatMessage(data.playerNumber, data.playerName, data.message, data.timestamp, messagesElement);
+        }
     }
 
     handlePlayerDisconnected(data) {
-        this.showNotification(`Игрок ${data.playerNumber} отключился`, 'warning');
+        this.showNotification(`${data.playerName || `Игрок ${data.playerNumber}`} отключился`, 'warning');
         this.showScreen('splashScreen');
     }
 
@@ -281,6 +344,14 @@ class BattleshipGame {
         
         // Настройка drag & drop
         this.setupDragAndDrop();
+        
+        // Обновляем имя игрока на экране
+        if (this.playerNumber === 1) {
+            document.getElementById('placementPlayerName').textContent = this.playerName;
+            document.getElementById('player1Name').textContent = this.playerName;
+        } else if (this.playerNumber === 2) {
+            document.getElementById('player2Name').textContent = this.playerName;
+        }
     }
 
     generateShipsToPlace() {
@@ -555,7 +626,7 @@ class BattleshipGame {
             
             const shipVisual = document.createElement('div');
             shipVisual.className = 'ship-visual';
-            shipVisual.style.width = `${ship.size * 30}px`;
+            shipVisual.style.width = `${ship.size * 25}px`;
             
             for (let i = 0; i < ship.size; i++) {
                 const segment = document.createElement('div');
@@ -613,9 +684,14 @@ class BattleshipGame {
     // ==================== ИГРОВОЙ ПРОЦЕСС ====================
     initGameScreen() {
         this.gameState = 'playing';
+        this.gameStats.startTime = Date.now();
         this.renderGameBoards();
         this.updateWeaponsDisplay();
         this.updateGamePhase();
+        this.updateGameStats();
+        
+        // Запускаем таймер игры
+        this.startGameTimer(900); // 15 минут
     }
 
     renderGameBoards() {
@@ -765,6 +841,18 @@ class BattleshipGame {
             
             weaponDisplay.innerHTML = `${icon} ${text}`;
         }
+        
+        // Подсвечиваем активное оружие
+        document.querySelectorAll('.weapon-card').forEach(card => {
+            card.classList.remove('active');
+        });
+        
+        if (this.currentWeapon !== 'normal') {
+            const weaponCard = document.getElementById(`${this.currentWeapon}Weapon`);
+            if (weaponCard) {
+                weaponCard.classList.add('active');
+            }
+        }
     }
 
     updateGamePhase() {
@@ -780,6 +868,52 @@ class BattleshipGame {
         }
         
         phaseElement.innerHTML = `<i class="fas fa-${this.isYourTurn ? 'play' : 'pause'}"></i><span>${text}</span>`;
+        
+        // Обновляем индикатор хода
+        const turnIndicator = document.getElementById('yourTurnIndicator');
+        if (turnIndicator) {
+            if (this.isYourTurn) {
+                turnIndicator.classList.remove('hidden');
+            } else {
+                turnIndicator.classList.add('hidden');
+            }
+        }
+    }
+
+    updateGameStats() {
+        // Обновляем статистику на экране
+        const accuracyStat = document.getElementById('accuracyStat');
+        const sunkShipsStat = document.getElementById('sunkShipsStat');
+        const speedStat = document.getElementById('speedStat');
+        
+        if (accuracyStat) {
+            accuracyStat.textContent = `${this.gameStats.accuracy}%`;
+        }
+        
+        if (sunkShipsStat) {
+            sunkShipsStat.textContent = `${this.gameStats.shipsSunk}/10`;
+        }
+        
+        // Рассчитываем скорость (секунд на ход)
+        if (speedStat && this.gameStats.shots > 0 && this.gameStats.startTime) {
+            const gameDuration = (Date.now() - this.gameStats.startTime) / 1000; // в секундах
+            const speed = Math.round(gameDuration / this.gameStats.shots);
+            speedStat.textContent = `${speed} с/ход`;
+        }
+        
+        // Обновляем счет игроков
+        const player1Shots = document.getElementById('player1Shots');
+        const player2Shots = document.getElementById('player2Shots');
+        const player1Ships = document.getElementById('player1Ships');
+        const player2Ships = document.getElementById('player2Ships');
+        
+        if (this.playerNumber === 1) {
+            if (player1Shots) player1Shots.textContent = this.gameStats.shots;
+            if (player1Ships) player1Ships.textContent = 10 - this.gameStats.shipsSunk;
+        } else {
+            if (player2Shots) player2Shots.textContent = this.gameStats.shots;
+            if (player2Ships) player2Ships.textContent = 10 - this.gameStats.shipsSunk;
+        }
     }
 
     shotByCoordinates() {
@@ -824,24 +958,24 @@ class BattleshipGame {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
             this.ws.send(JSON.stringify({
                 type: 'CHAT',
-                message: message,
-                context: context
+                message: message
             }));
             
-            this.addChatMessage(this.playerNumber, message, messagesElement);
+            // Локально добавляем сообщение
+            this.addChatMessage(this.playerNumber, this.playerName, message, new Date().toISOString(), messagesElement);
             inputElement.value = '';
         }
     }
 
-    addChatMessage(playerNumber, message, container) {
+    addChatMessage(playerNumber, playerName, message, timestamp, container) {
         const messageElement = document.createElement('div');
         messageElement.className = `chat-message ${playerNumber === this.playerNumber ? 'own' : 'opponent'}`;
         
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const time = new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         
         messageElement.innerHTML = `
             <div class="message-header">
-                <span class="message-sender">${playerNumber === this.playerNumber ? 'Вы' : 'Соперник'}</span>
+                <span class="message-sender">${playerName}</span>
                 <span class="message-time">${time}</span>
             </div>
             <div class="message-content">${this.escapeHtml(message)}</div>
@@ -852,7 +986,8 @@ class BattleshipGame {
     }
 
     // ==================== РЕЗУЛЬТАТ ИГРЫ ====================
-    showGameResult(result, winner) {
+    showGameResult(result, winnerName) {
+        this.gameState = 'finished';
         this.showScreen('resultScreen');
         
         const resultContent = document.getElementById('resultContent');
@@ -870,19 +1005,58 @@ class BattleshipGame {
             </div>
             <div class="result-reason">
                 <p>${message}</p>
-                <p>Победитель: <strong>Игрок ${winner}</strong></p>
+                <p>Победитель: <strong>${winnerName}</strong></p>
             </div>
         `;
         
+        // Обновляем статистику игры
+        this.updateResultStats();
+        
         if (isWin) {
+            this.playSound('win');
             this.createConfetti();
+        } else {
+            this.playSound('sunk');
         }
+    }
+
+    updateResultStats() {
+        const statsElement = document.getElementById('gameStats');
+        if (!statsElement) return;
+        
+        const gameDuration = this.gameStats.startTime ? 
+            Math.round((Date.now() - this.gameStats.startTime) / 1000) : 0;
+        const minutes = Math.floor(gameDuration / 60);
+        const seconds = gameDuration % 60;
+        
+        statsElement.innerHTML = `
+            <div class="stat-item">
+                <span class="stat-label">Точность:</span>
+                <span class="stat-value">${this.gameStats.accuracy}%</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Выстрелов:</span>
+                <span class="stat-value">${this.gameStats.shots}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Попаданий:</span>
+                <span class="stat-value">${this.gameStats.hits}</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Потоплено:</span>
+                <span class="stat-value">${this.gameStats.shipsSunk}/10</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">Время игры:</span>
+                <span class="stat-value">${minutes}:${seconds.toString().padStart(2, '0')}</span>
+            </div>
+        `;
     }
 
     createConfetti() {
         const colors = ['#64ffda', '#ff6b6b', '#ffd166', '#4cc9f0', '#c77dff'];
         
-        for (let i = 0; i < 100; i++) {
+        for (let i = 0; i < 150; i++) {
             const confetti = document.createElement('div');
             confetti.style.cssText = `
                 position: fixed;
@@ -941,6 +1115,7 @@ class BattleshipGame {
         if (confirm('Вы действительно хотите сдаться?')) {
             if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                 this.ws.send(JSON.stringify({ type: 'SURRENDER' }));
+                this.showNotification('Вы сдались', 'warning');
             }
         }
     }
@@ -975,6 +1150,30 @@ class BattleshipGame {
         return Array(10).fill().map(() => Array(10).fill(0));
     }
 
+    coordToString(x, y) {
+        const letters = 'ABCDEFGHIJ';
+        return `${letters[x]}${y + 1}`;
+    }
+
+    addEventToLog(eventText) {
+        const logElement = document.getElementById('eventsLog');
+        if (!logElement) return;
+        
+        const eventElement = document.createElement('div');
+        eventElement.className = 'event-item';
+        
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        eventElement.innerHTML = `<span class="event-time">${time}</span><span class="event-text">${eventText}</span>`;
+        
+        logElement.appendChild(eventElement);
+        logElement.scrollTop = logElement.scrollHeight;
+        
+        // Ограничиваем количество записей
+        if (logElement.children.length > 50) {
+            logElement.removeChild(logElement.firstChild);
+        }
+    }
+
     updateRoomIdDisplay() {
         const elements = [
             document.getElementById('displayRoomId'),
@@ -997,6 +1196,24 @@ class BattleshipGame {
         if (input) {
             input.value = inviteLink;
         }
+        
+        // Обновляем QR-код если есть
+        this.updateQRCode(inviteLink);
+    }
+
+    updateQRCode(url) {
+        const container = document.getElementById('qrCodeContainer');
+        if (!container || !window.QRCode) return;
+        
+        container.innerHTML = '';
+        new QRCode(container, {
+            text: url,
+            width: 128,
+            height: 128,
+            colorDark: "#64ffda",
+            colorLight: "#112240",
+            correctLevel: QRCode.CorrectLevel.H
+        });
     }
 
     copyRoomId() {
@@ -1028,6 +1245,40 @@ class BattleshipGame {
         this.showNotification('Вы вышли из комнаты', 'info');
     }
 
+    // ==================== ТАЙМЕРЫ ====================
+    startGameTimer(seconds) {
+        let timeLeft = seconds;
+        const timerElement = document.getElementById('gameTimer');
+        
+        this.gameTimer = setInterval(() => {
+            if (timeLeft <= 0) {
+                clearInterval(this.gameTimer);
+                this.handleTimeOut();
+                return;
+            }
+            
+            const minutes = Math.floor(timeLeft / 60);
+            const secs = timeLeft % 60;
+            
+            if (timerElement) {
+                timerElement.textContent = `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            }
+            
+            timeLeft--;
+        }, 1000);
+    }
+
+    handleTimeOut() {
+        if (this.gameState === 'playing') {
+            this.showNotification('Время игры истекло!', 'error');
+            // Определяем победителя (у кого больше потопленных кораблей)
+            const winner = this.gameStats.shipsSunk >= 5 ? this.playerNumber : 
+                         (this.playerNumber === 1 ? 2 : 1);
+            this.showGameResult(winner === this.playerNumber ? 'win' : 'lose', `Игрок ${winner}`);
+        }
+    }
+
+    // ==================== УВЕДОМЛЕНИЯ И СТАТУС ====================
     showNotification(message, type = 'info') {
         console.log(`[${type.toUpperCase()}] ${message}`);
         
@@ -1038,23 +1289,6 @@ class BattleshipGame {
                               type === 'error' ? 'exclamation-circle' : 
                               type === 'warning' ? 'exclamation-triangle' : 'info-circle'}"></i>
             <span>${message}</span>
-        `;
-        
-        notification.style.cssText = `
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background: ${type === 'success' ? '#4CAF50' : 
-                         type === 'error' ? '#F44336' : 
-                         type === 'warning' ? '#FF9800' : '#2196F3'};
-            color: white;
-            padding: 15px 20px;
-            border-radius: 5px;
-            z-index: 10000;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            animation: slideIn 0.3s ease;
         `;
         
         document.body.appendChild(notification);
@@ -1091,6 +1325,7 @@ class BattleshipGame {
         this.showNotification(message, 'error');
     }
 
+    // ==================== УПРАВЛЕНИЕ ЭКРАНАМИ ====================
     showScreen(screenId) {
         document.querySelectorAll('.screen').forEach(screen => {
             screen.classList.add('hidden');
@@ -1099,6 +1334,10 @@ class BattleshipGame {
         const screen = document.getElementById(screenId);
         if (screen) {
             screen.classList.remove('hidden');
+            this.gameState = screenId.replace('Screen', '');
+            
+            // Прокручиваем вверх при смене экрана
+            screen.scrollTop = 0;
         }
         
         console.log(`Переход на экран: ${screenId}`);
@@ -1142,7 +1381,8 @@ class BattleshipGame {
             'shot': document.getElementById('soundShot'),
             'hit': document.getElementById('soundHit'),
             'sunk': document.getElementById('soundSunk'),
-            'place': document.getElementById('soundPlace')
+            'place': document.getElementById('soundPlace'),
+            'win': document.getElementById('soundWin')
         };
         
         const sound = soundMap[soundName];
