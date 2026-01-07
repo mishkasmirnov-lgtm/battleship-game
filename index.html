@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>⚓ Морской Бой | Replit</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Roboto:wght@300;400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Главный контейнер -->
+    <div class="container" id="app">
+        <!-- Заставка -->
+        <div class="screen" id="splashScreen">
+            <div class="splash-content">
+                <div class="title-animation">
+                    <h1><i class="fas fa-water"></i> МОРСКОЙ БОЙ</h1>
+                    <div class="subtitle">ULTIMATE EDITION</div>
+                </div>
+                <div class="wave-container">
+                    <div class="wave"></div>
+                    <div class="wave"></div>
+                    <div class="wave"></div>
+                </div>
+                <div class="splash-buttons">
+                    <button class="btn-primary" onclick="showCreateRoom()">
+                        <i class="fas fa-plus-circle"></i> СОЗДАТЬ КОМНАТУ
+                    </button>
+                    <button class="btn-secondary" onclick="showJoinRoom()">
+                        <i class="fas fa-sign-in-alt"></i> ПРИСОЕДИНИТЬСЯ
+                    </button>
+                </div>
+                <div class="features-list">
+                    <div class="feature">
+                        <i class="fas fa-bomb"></i>
+                        <span>Специальное оружие</span>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-ship"></i>
+                        <span>Динамическая расстановка</span>
+                    </div>
+                    <div class="feature">
+                        <i class="fas fa-broadcast-tower"></i>
+                        <span>Онлайн-битва</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Экран создания/подключения к комнате -->
+        <div class="screen hidden" id="roomScreen">
+            <div class="room-container">
+                <div class="room-header">
+                    <h2><i class="fas fa-door-closed"></i> ИГРОВАЯ КОМНАТА</h2>
+                    <button class="btn-back" onclick="showSplash()">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                </div>
+                
+                <div class="room-tabs">
+                    <button class="tab active" onclick="switchTab('create')">
+                        СОЗДАТЬ
+                    </button>
+                    <button class="tab" onclick="switchTab('join')">
+                        ПРИСОЕДИНИТЬСЯ
+                    </button>
+                </div>
+                
+                <div class="tab-content active" id="createTab">
+                    <div class="form-group">
+                        <label>Имя игрока:</label>
+                        <input type="text" id="playerName" 
+                               placeholder="Адмирал" maxlength="20">
+                    </div>
+                    <button class="btn-create" onclick="createRoom()">
+                        <i class="fas fa-anchor"></i> СОЗДАТЬ КОМНАТУ
+                    </button>
+                    <div class="room-info">
+                        <p><i class="fas fa-info-circle"></i> После создания поделись ссылкой с другом</p>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="joinTab">
+                    <div class="form-group">
+                        <label>Имя игрока:</label>
+                        <input type="text" id="joinPlayerName" 
+                               placeholder="Капитан" maxlength="20">
+                    </div>
+                    <div class="form-group">
+                        <label>ID комнаты:</label>
+                        <input type="text" id="roomIdInput" 
+                               placeholder="ABCDEF" maxlength="6">
+                    </div>
+                    <button class="btn-join" onclick="joinRoom()">
+                        <i class="fas fa-ship"></i> ВСТУПИТЬ В БОЙ
+                    </button>
+                </div>
+                
+                <div class="connection-status hidden" id="connectionStatus">
+                    <div class="status-pulse"></div>
+                    <span>Подключение к серверу...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Экран ожидания игрока -->
+        <div class="screen hidden" id="waitingScreen">
+            <div class="waiting-container">
+                <div class="waiting-header">
+                    <h2><i class="fas fa-clock"></i> ОЖИДАНИЕ СОПЕРНИКА</h2>
+                    <div class="room-id-display">
+                        ID КОМНАТЫ: <span id="displayRoomId">ABCDEF</span>
+                        <button class="btn-copy" onclick="copyRoomId()">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="waiting-content">
+                    <div class="loading-animation">
+                        <div class="sonar">
+                            <div class="sonar-wave"></div>
+                            <div class="sonar-wave"></div>
+                            <div class="sonar-dot"></div>
+                        </div>
+                        <p>Сканирование на наличие противника...</p>
+                    </div>
+                    
+                    <div class="share-section">
+                        <h3><i class="fas fa-share-alt"></i> ПРИГЛАСИТЬ ДРУГА</h3>
+                        <div class="share-link">
+                            <input type="text" id="inviteLink" readonly>
+                            <button class="btn-share" onclick="copyInviteLink()">
+                                <i class="fas fa-copy"></i> Копировать
+                            </button>
+                        </div>
+                        <div class="qr-code" id="qrCodeContainer">
+                            <!-- QR код будет сгенерирован здесь -->
+                        </div>
+                    </div>
+                    
+                    <div class="game-info">
+                        <div class="info-card">
+                            <i class="fas fa-user-clock"></i>
+                            <h4>1 игрок онлайн</h4>
+                            <p>Ожидание второго игрока</p>
+                        </div>
+                        <div class="info-card">
+                            <i class="fas fa-cogs"></i>
+                            <h4>Готовность</h4>
+                            <p>Начнётся автоматически</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <button class="btn-cancel" onclick="leaveRoom()">
+                    <i class="fas fa-times"></i> ОТМЕНИТЬ
+                </button>
+            </div>
+        </div>
+
+        <!-- Экран расстановки кораблей -->
+        <div class="screen hidden" id="placementScreen">
+            <div class="placement-container">
+                <div class="placement-header">
+                    <div class="header-left">
+                        <h2><i class="fas fa-th-large"></i> РАССТАНОВКА ФЛОТА</h2>
+                        <div class="player-indicator">
+                            <i class="fas fa-user"></i>
+                            <span id="placementPlayerName">Игрок 1</span>
+                        </div>
+                    </div>
+                    <div class="header-right">
+                        <div class="timer">
+                            <i class="fas fa-hourglass-half"></i>
+                            <span id="placementTimer">02:00</span>
+                        </div>
+                        <div class="room-id-small">
+                            ID: <span id="placementRoomId">ABCDEF</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="placement-content">
+                    <!-- Левая панель - доступные корабли -->
+                    <div class="ships-panel">
+                        <h3><i class="fas fa-ship"></i> ВАШ ФЛОТ</h3>
+                        <div class="ships-list" id="shipsList">
+                            <!-- Корабли будут добавлены через JS -->
+                        </div>
+                        
+                        <div class="controls">
+                            <button class="btn-control" onclick="rotateShip()">
+                                <i class="fas fa-redo"></i> ПОВЕРНУТЬ
+                            </button>
+                            <button class="btn-control" onclick="randomPlacement()">
+                                <i class="fas fa-random"></i> АВТОРАССТАНОВКА
+                            </button>
+                            <button class="btn-control" onclick="clearBoard()">
+                                <i class="fas fa-trash"></i> ОЧИСТИТЬ
+                            </button>
+                        </div>
+                        
+                        <div class="instructions">
+                            <p><i class="fas fa-mouse-pointer"></i> Перетащи корабли на поле</p>
+                            <p><i class="fas fa-rotate-right"></i> Нажми ПОВЕРНУТЬ для смены ориентации</p>
+                            <p><i class="fas fa-handshake"></i> Корабли не должны касаться друг друга</p>
+                        </div>
+                    </div>
+                    
+                    <!-- Центр - игровое поле -->
+                    <div class="board-container">
+                        <div class="board-header">
+                            <h3><i class="fas fa-map"></i> ВАШЕ ПОЛЕ</h3>
+                            <div class="board-stats">
+                                <span>Корабли: <span id="shipsPlacedCount">0</span>/10</span>
+                                <span>Клетки: <span id="cellsPlacedCount">0</span>/20</span>
+                            </div>
+                        </div>
+                        
+                        <div class="board" id="placementBoard">
+                            <!-- Игровое поле 10x10 будет создано через JS -->
+                        </div>
+                        
+                        <div class="board-coordinates">
+                            <div class="letters">
+                                <!-- Буквы A-J -->
+                            </div>
+                            <div class="numbers">
+                                <!-- Цифры 1-10 -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Правая панель - информация и чат -->
+                    <div class="info-panel">
+                        <div class="panel-section">
+                            <h3><i class="fas fa-info-circle"></i> ИНФОРМАЦИЯ</h3>
+                            <div class="status-message">
+                                <div class="status-icon waiting"></div>
+                                <p>Ожидание расстановки кораблей</p>
+                            </div>
+                            
+                            <div class="opponent-status">
+                                <h4>Соперник:</h4>
+                                <p id="opponentStatus">Не подключен</p>
+                            </div>
+                        </div>
+                        
+                        <div class="panel-section">
+                            <h3><i class="fas fa-comments"></i> ЧАТ</h3>
+                            <div class="chat-container">
+                                <div class="chat-messages" id="placementChat">
+                                    <!-- Сообщения чата -->
+                                </div>
+                                <div class="chat-input">
+                                    <input type="text" 
+                                           id="placementChatInput" 
+                                           placeholder="Написать сообщение...">
+                                    <button onclick="sendPlacementChat()">
+                                        <i class="fas fa-paper-plane"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="placement-footer">
+                    <div class="ready-status">
+                        <div class="ready-icon" id="readyIcon">
+                            <i class="fas fa-hourglass-half"></i>
+                        </div>
+                        <p id="readyText">Расставляйте корабли</p>
+                    </div>
+                    <button class="btn-ready" id="readyButton" 
+                            onclick="confirmPlacement()" disabled>
+                        <i class="fas fa-check-circle"></i> ГОТОВ К БОЮ
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Экран игры (основной бой) -->
+        <div class="screen hidden" id="gameScreen">
+            <div class="game-container">
+                <!-- Верхняя панель -->
+                <div class="game-header">
+                    <div class="header-player">
+                        <div class="player-badge player1">
+                            <i class="fas fa-user"></i>
+                            <div class="player-info">
+                                <h3 id="player1Name">Игрок 1</h3>
+                                <div class="player-stats">
+                                    <span>Корабли: <span id="player1Ships">10</span></span>
+                                    <span>Выстрелы: <span id="player1Shots">0</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="header-center">
+                        <div class="game-title">
+                            <h2><i class="fas fa-crosshairs"></i> МОРСКОЙ БОЙ</h2>
+                            <div class="game-phase" id="gamePhase">
+                                <i class="fas fa-sync-alt"></i>
+                                <span>ХОД ИГРОКА 1</span>
+                            </div>
+                        </div>
+                        
+                        <div class="game-timer">
+                            <i class="fas fa-clock"></i>
+                            <span id="gameTimer">15:00</span>
+                        </div>
+                        
+                        <div class="room-id-game">
+                            <i class="fas fa-hashtag"></i>
+                            <span id="gameRoomId">ABCDEF</span>
+                        </div>
+                    </div>
+                    
+                    <div class="header-player">
+                        <div class="player-badge player2">
+                            <i class="fas fa-user"></i>
+                            <div class="player-info">
+                                <h3 id="player2Name">Игрок 2</h3>
+                                <div class="player-stats">
+                                    <span>Корабли: <span id="player2Ships">10</span></span>
+                                    <span>Выстрелы: <span id="player2Shots">0</span></span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Основная область игры -->
+                <div class="game-main">
+                    <!-- Левая панель - ваше поле -->
+                    <div class="game-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-shield-alt"></i> ВАШ ФЛОТ</h3>
+                            <div class="turn-indicator" id="yourTurnIndicator">
+                                <div class="indicator-dot"></div>
+                                <span>Ваш ход</span>
+                            </div>
+                        </div>
+                        
+                        <div class="board-container">
+                            <div class="board" id="yourBoard">
+                                <!-- Ваше поле с кораблями -->
+                            </div>
+                        </div>
+                        
+                        <div class="fleet-status">
+                            <h4>СОСТОЯНИЕ ФЛОТА:</h4>
+                            <div class="ships-health" id="yourShipsHealth">
+                                <!-- Статус кораблей -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Центральная панель - управление и информация -->
+                    <div class="game-center">
+                        <!-- Специальное оружие -->
+                        <div class="weapons-panel">
+                            <h3><i class="fas fa-bomb"></i> СПЕЦИАЛЬНОЕ ОРУЖИЕ</h3>
+                            <div class="weapons-grid">
+                                <div class="weapon-card" 
+                                     onclick="useWeapon('bomb')" 
+                                     id="bombWeapon">
+                                    <div class="weapon-icon">
+                                        <i class="fas fa-bomb"></i>
+                                    </div>
+                                    <div class="weapon-info">
+                                        <h4>БОМБА</h4>
+                                        <p>Площадь 3x3</p>
+                                        <div class="weapon-count">
+                                            <i class="fas fa-missile"></i>
+                                            <span id="bombCount">2</span>
+                                        </div>
+                                    </div>
+                                    <div class="weapon-description">
+                                        Наносит урон по области
+                                    </div>
+                                </div>
+                                
+                                <div class="weapon-card" 
+                                     onclick="useWeapon('radar')" 
+                                     id="radarWeapon">
+                                    <div class="weapon-icon">
+                                        <i class="fas fa-satellite-dish"></i>
+                                    </div>
+                                    <div class="weapon-info">
+                                        <h4>РАДАР</h4>
+                                        <p>Сканирование 3x3</p>
+                                        <div class="weapon-count">
+                                            <i class="fas fa-eye"></i>
+                                            <span id="radarCount">1</span>
+                                        </div>
+                                    </div>
+                                    <div class="weapon-description">
+                                        Обнаруживает корабли
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="current-weapon" id="currentWeaponDisplay">
+                                <i class="fas fa-crosshairs"></i>
+                                <span>Обычный выстрел</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Лог событий -->
+                        <div class="events-panel">
+                            <h3><i class="fas fa-history"></i> ИСТОРИЯ БОЯ</h3>
+                            <div class="events-log" id="eventsLog">
+                                <!-- События игры -->
+                            </div>
+                        </div>
+                        
+                        <!-- Мини-карта -->
+                        <div class="minimap-panel">
+                            <h3><i class="fas fa-map-marked-alt"></i> КАРТА ОБСТРЕЛА</h3>
+                            <div class="minimap" id="minimap">
+                                <!-- Мини-карта выстрелов -->
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Правая панель - поле противника -->
+                    <div class="game-panel">
+                        <div class="panel-header">
+                            <h3><i class="fas fa-crosshairs"></i> ЦЕЛЬ</h3>
+                            <div class="target-info">
+                                <span>Выберите клетку для атаки</span>
+                            </div>
+                        </div>
+                        
+                        <div class="board-container">
+                            <div class="board enemy-board" id="enemyBoard">
+                                <!-- Поле противника для атаки -->
+                            </div>
+                        </div>
+                        
+                        <div class="attack-info">
+                            <h4>ПОСЛЕДНЯЯ АТАКА:</h4>
+                            <div class="last-shot" id="lastShotInfo">
+                                <span>Ещё не было атак</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Нижняя панель - чат и управление -->
+                <div class="game-footer">
+                    <div class="chat-section">
+                        <div class="chat-header">
+                            <h4><i class="fas fa-comments"></i> ЧАТ</h4>
+                            <div class="online-status">
+                                <div class="status-dot online"></div>
+                                <span>Соперник онлайн</span>
+                            </div>
+                        </div>
+                        <div class="game-chat">
+                            <div class="chat-messages" id="gameChat">
+                                <!-- Сообщения чата -->
+                            </div>
+                            <div class="chat-input">
+                                <input type="text" 
+                                       id="gameChatInput" 
+                                       placeholder="Отправить сообщение..."
+                                       onkeypress="handleChatKeypress(event)">
+                                <button onclick="sendGameChat()">
+                                    <i class="fas fa-paper-plane"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="controls-section">
+                        <div class="shot-coordinates">
+                            <h4>КООРДИНАТЫ:</h4>
+                            <div class="coord-display" id="coordDisplay">
+                                <span>A1</span>
+                            </div>
+                            <div class="coord-input">
+                                <input type="text" 
+                                       id="coordInput" 
+                                       placeholder="B5"
+                                       maxlength="2">
+                                <button onclick="shotByCoordinates()">
+                                    <i class="fas fa-fire"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="action-buttons">
+                            <button class="btn-action" onclick="surrender()">
+                                <i class="fas fa-flag"></i> СДАТЬСЯ
+                            </button>
+                            <button class="btn-action" onclick="proposeRematch()">
+                                <i class="fas fa-redo"></i> РЕВАНШ
+                            </button>
+                            <button class="btn-action" onclick="showGameMenu()">
+                                <i class="fas fa-cog"></i> МЕНЮ
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="stats-section">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-bullseye"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h4>ТОЧНОСТЬ</h4>
+                                <p id="accuracyStat">0%</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-ship"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h4>ПОТОПЛЕНО</h4>
+                                <p id="sunkShipsStat">0/10</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-bolt"></i>
+                            </div>
+                            <div class="stat-info">
+                                <h4>СКОРОСТЬ</h4>
+                                <p id="speedStat">0 с/ход</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Экран результата -->
+        <div class="screen hidden" id="resultScreen">
+            <div class="result-container">
+                <div class="result-content" id="resultContent">
+                    <!-- Содержимое будет заполнено динамически -->
+                </div>
+                
+                <div class="result-actions">
+                    <button class="btn-rematch" onclick="requestRematch()">
+                        <i class="fas fa-redo"></i> РЕВАНШ
+                    </button>
+                    <button class="btn-new-game" onclick="newGame()">
+                        <i class="fas fa-plus-circle"></i> НОВАЯ ИГРА
+                    </button>
+                    <button class="btn-main-menu" onclick="returnToMain()">
+                        <i class="fas fa-home"></i> ГЛАВНОЕ МЕНЮ
+                    </button>
+                </div>
+                
+                <div class="result-stats">
+                    <h3><i class="fas fa-chart-bar"></i> СТАТИСТИКА ИГРЫ</h3>
+                    <div class="stats-grid" id="gameStats">
+                        <!-- Статистика будет заполнена динамически -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Модальное окно настроек -->
+        <div class="modal hidden" id="settingsModal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3><i class="fas fa-cog"></i> НАСТРОЙКИ</h3>
+                    <button class="modal-close" onclick="closeModal('settingsModal')">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <!-- Настройки будут добавлены позже -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Звуковые элементы -->
+    <audio id="soundShot" preload="auto">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-laser-weapon-shot-1671.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="soundHit" preload="auto">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-explosion-hit-1994.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="soundSunk" preload="auto">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-deep-water-splash-1188.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="soundWin" preload="auto">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-winning-chimes-2015.mp3" type="audio/mpeg">
+    </audio>
+    <audio id="soundPlace" preload="auto">
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-plastic-bubble-click-1124.mp3" type="audio/mpeg">
+    </audio>
+
+    <!-- Подключение скриптов -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>
