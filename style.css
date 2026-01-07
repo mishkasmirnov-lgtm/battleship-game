@@ -502,3 +502,215 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--gradient-accent);
 }
+/* Добавьте в конец файла style.css */
+
+/* ==================== АДАПТИВНОСТЬ ==================== */
+@media (max-width: 1400px) {
+    .game-main {
+        grid-template-columns: 1fr auto 1fr;
+        gap: 20px;
+    }
+    
+    .game-footer {
+        grid-template-columns: 1fr auto auto;
+    }
+}
+
+@media (max-width: 1200px) {
+    .game-main {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto auto;
+    }
+    
+    .game-center {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+    
+    .board {
+        width: 350px;
+        height: 350px;
+    }
+    
+    .game-footer {
+        grid-template-columns: 1fr 1fr;
+        grid-template-rows: auto auto;
+    }
+    
+    .stats-section {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        justify-content: center;
+    }
+}
+
+@media (max-width: 992px) {
+    .placement-content {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto auto;
+    }
+    
+    .ships-panel {
+        grid-row: 1;
+    }
+    
+    .board-container {
+        grid-row: 2;
+    }
+    
+    .info-panel {
+        grid-row: 3;
+    }
+    
+    .game-main {
+        grid-template-columns: 1fr;
+    }
+    
+    .game-panel, .game-center {
+        width: 100%;
+    }
+    
+    .board {
+        width: 320px;
+        height: 320px;
+    }
+}
+
+@media (max-width: 768px) {
+    .screen {
+        padding: 10px;
+        overflow-y: auto;
+    }
+    
+    .game-header {
+        flex-direction: column;
+        gap: 15px;
+    }
+    
+    .header-player {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .game-footer {
+        grid-template-columns: 1fr;
+    }
+    
+    .board {
+        width: 280px;
+        height: 280px;
+    }
+    
+    .weapons-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .placement-footer {
+        flex-direction: column;
+        gap: 15px;
+        position: sticky;
+        bottom: 0;
+        background: var(--secondary-dark);
+        padding: 15px;
+        border-top: 2px solid var(--accent-blue);
+    }
+    
+    .btn-ready {
+        width: 100%;
+        order: -1;
+    }
+}
+
+@media (max-width: 576px) {
+    .board {
+        width: 250px;
+        height: 250px;
+    }
+    
+    .cell {
+        font-size: 12px;
+    }
+    
+    .choice-btn {
+        width: 80px;
+        height: 80px;
+        font-size: 35px;
+    }
+    
+    .btn-ready {
+        padding: 12px 20px;
+        font-size: 14px;
+    }
+    
+    .game-title h2 {
+        font-size: 18px;
+    }
+}
+
+/* ==================== ПРОКРУТКА ==================== */
+.screen {
+    overflow-y: auto;
+    max-height: 100vh;
+}
+
+.placement-container,
+.game-container,
+.result-container {
+    min-height: min-content;
+}
+
+/* Фикс для кнопки "Готов к бою" */
+.placement-footer {
+    position: sticky;
+    bottom: 0;
+    background: var(--secondary-dark);
+    padding: 20px;
+    border-top: 2px solid var(--accent-blue);
+    margin-top: 20px;
+    z-index: 100;
+}
+
+/* Фикс для чата */
+.chat-messages {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Улучшение видимости элементов */
+.btn-ready {
+    background: linear-gradient(90deg, #00dbde, #fc00ff);
+    color: white;
+    border: none;
+    padding: 15px 30px;
+    border-radius: 10px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    box-shadow: 0 5px 15px rgba(0, 219, 222, 0.4);
+    transition: all 0.3s ease;
+}
+
+.btn-ready:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 219, 222, 0.6);
+}
+
+.btn-ready:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Добавьте это чтобы убрать горизонтальную прокрутку */
+html, body {
+    overflow-x: hidden;
+    width: 100%;
+}
+
+.container {
+    width: 100%;
+    max-width: 100%;
+}
