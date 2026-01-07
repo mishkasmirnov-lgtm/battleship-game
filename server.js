@@ -1,10 +1,67 @@
-// server.js
+// server.js - Исправленная версия для Render.com
 const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
+const path = require('path');
+const fs = require('fs');
 
-// Создаем HTTP и WebSocket сервер
-const server = http.createServer();
+// Создаем HTTP сервер, который отдает файлы
+const server = http.createServer((req, res) => {
+    // Логируем запрос для отладки
+    console.log(`HTTP запрос: ${req.url}`);
+    
+    // Определяем путь к файлу
+    let filePath = '.' + req.url;
+    if (filePath === './') {
+        filePath = './index.html';
+    }
+    
+    // Получаем расширение файла для правильного Content-Type
+    const extname = path.extname(filePath);
+    let contentType = 'text/html';
+    
+    switch (extname) {
+        case '.js':
+            contentType = 'application/javascript';
+            break;
+        case '.css':
+            contentType = 'text/css';
+            break;
+        case '.json':
+            contentType = 'application/json';
+            break;
+        case '.png':
+            contentType = 'image/png';
+            break;
+        case '.jpg':
+            contentType = 'image/jpg';
+            break;
+        case '.ico':
+            contentType = 'image/x-icon';
+            break;
+    }
+    
+    // Читаем файл
+    fs.readFile(path.join(__dirname, filePath), (error, content) => {
+        if (error) {
+            if (error.code === 'ENOENT') {
+                // Файл не найден
+                res.writeHead(404, { 'Content-Type': 'text/html' });
+                res.end('404: Страница не найдена', 'utf-8');
+            } else {
+                // Другая ошибка сервера
+                res.writeHead(500);
+                res.end(`Ошибка сервера: ${error.code}`, 'utf-8');
+            }
+        } else {
+            // Успешно - отдаем файл
+            res.writeHead(200, { 'Content-Type': contentType });
+            res.end(content, 'utf-8');
+        }
+    });
+});
+
+// Создаем WebSocket сервер на том же HTTP сервере
 const wss = new WebSocket.Server({ server });
 
 // Хранилище игровых комнат
@@ -24,7 +81,8 @@ const MESSAGE_TYPES = {
     CHAT_MESSAGE: 'CHAT_MESSAGE',
     PLAYER_DISCONNECTED: 'PLAYER_DISCONNECTED',
     SPECIAL_WEAPON_USED: 'SPECIAL_WEAPON_USED',
-    SHIPS_PLACED: 'SHIPS_PLACED'
+    SHIPS_PLACED: 'SHIPS_PLACED',
+    ERROR: 'ERROR'
 };
 
 // Конфигурация кораблей
@@ -36,6 +94,8 @@ const SHIP_CONFIG = [
 ];
 
 wss.on('connection', (ws, req) => {
+    console.log(`Новое WebSocket подключение: ${req.url}`);
+    
     const params = url.parse(req.url, true).query;
     const roomId = params.room || generateRoomId();
     const playerId = generatePlayerId();
@@ -63,7 +123,7 @@ wss.on('connection', (ws, req) => {
     // Проверяем, можно ли присоединиться к комнате
     if (room.players.size >= 2) {
         ws.send(JSON.stringify({
-            type: 'ERROR',
+            type: MESSAGE_TYPES.ERROR,
             message: 'Комната заполнена'
         }));
         ws.close();
@@ -483,9 +543,10 @@ function generatePlayerId() {
     return Math.random().toString(36).substring(2, 10);
 }
 
-// Запускаем сервер
+// Запускаем сервер на порту, который предоставляет Render
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Сервер запущен на порту ${PORT}`);
-    console.log(`WebSocket готов к подключениям`);
+    console.log(`✅ Сервер запущен на порту ${PORT}`);
+    console.log(`✅ HTTP и WebSocket работают на одном порту`);
+    console.log(`✅ Доступные файлы: index.html, style.css, game.js`);
 });
