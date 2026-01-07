@@ -1,0 +1,16 @@
+{
+  "name": "battleship-game",
+  "version": "1.0.0",
+  "description": "Морской бой с анимациями для двоих",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.14.2",
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": "18.x"
+  }
+}
