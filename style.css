@@ -1,0 +1,504 @@
+/* style.css */
+:root {
+    /* Цветовая палитра */
+    --primary-dark: #0a192f;
+    --secondary-dark: #112240;
+    --accent-blue: #64ffda;
+    --accent-red: #ff6b6b;
+    --accent-yellow: #ffd166;
+    --text-primary: #e6f1ff;
+    --text-secondary: #8892b0;
+    
+    /* Градиенты */
+    --gradient-primary: linear-gradient(135deg, #0a192f 0%, #112240 100%);
+    --gradient-accent: linear-gradient(90deg, #64ffda 0%, #4cc9f0 100%);
+    --gradient-danger: linear-gradient(90deg, #ff6b6b 0%, #ff8e53 100%);
+    
+    /* Тени */
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 8px rgba(0, 0, 0, 0.4);
+    --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.5);
+    --shadow-glow: 0 0 20px rgba(100, 255, 218, 0.3);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Roboto', sans-serif;
+    background: var(--gradient-primary);
+    color: var(--text-primary);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+.container {
+    width: 100%;
+    min-height: 100vh;
+    position: relative;
+}
+
+/* ===== ЭКРАНЫ ===== */
+.screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: opacity 0.5s ease, transform 0.5s ease;
+}
+
+.screen.hidden {
+    display: none;
+}
+
+/* ===== ЗАСТАВКА ===== */
+.splash-content {
+    text-align: center;
+    max-width: 800px;
+    animation: fadeInUp 1s ease;
+}
+
+.title-animation h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 4rem;
+    font-weight: 900;
+    margin-bottom: 10px;
+    background: var(--gradient-accent);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: var(--shadow-glow);
+    animation: pulse 2s infinite;
+}
+
+.subtitle {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    letter-spacing: 3px;
+    margin-bottom: 50px;
+}
+
+/* Анимация волн */
+.wave-container {
+    position: relative;
+    height: 100px;
+    margin: 40px 0;
+    overflow: hidden;
+}
+
+.wave {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 100px;
+    background: url('data:image/svg+xml;utf8,<svg viewBox="0 0 1200 120" xmlns="http://www.w3.org/2000/svg"><path d="M0 59L50 55C100 51 200 43 300 37C400 31 500 27 600 31C700 35 800 47 900 53C1000 59 1100 59 1150 59L1200 59V121H1150C1100 121 1000 121 900 121C800 121 700 121 600 121C500 121 400 121 300 121C200 121 100 121 50 121H0V59Z" fill="%2364ffda"/></svg>');
+    background-size: 1200px 100px;
+    animation: wave 12s linear infinite;
+}
+
+.wave:nth-child(2) {
+    opacity: 0.5;
+    animation: wave 10s linear infinite;
+}
+
+.wave:nth-child(3) {
+    opacity: 0.2;
+    animation: wave 8s linear infinite;
+}
+
+/* Кнопки */
+.btn-primary, .btn-secondary {
+    padding: 15px 40px;
+    font-size: 1.1rem;
+    font-weight: 500;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    margin: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-family: 'Orbitron', sans-serif;
+    letter-spacing: 1px;
+}
+
+.btn-primary {
+    background: var(--gradient-accent);
+    color: var(--primary-dark);
+    box-shadow: var(--shadow-md);
+}
+
+.btn-primary:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+}
+
+.btn-secondary {
+    background: transparent;
+    color: var(--accent-blue);
+    border: 2px solid var(--accent-blue);
+}
+
+.btn-secondary:hover {
+    background: rgba(100, 255, 218, 0.1);
+}
+
+/* ===== КОМНАТА ===== */
+.room-container {
+    background: var(--secondary-dark);
+    border-radius: 20px;
+    padding: 30px;
+    max-width: 500px;
+    width: 100%;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid rgba(100, 255, 218, 0.1);
+}
+
+.room-tabs {
+    display: flex;
+    margin-bottom: 30px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 10px;
+    padding: 5px;
+}
+
+.tab {
+    flex: 1;
+    padding: 15px;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-family: 'Orbitron', sans-serif;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border-radius: 8px;
+}
+
+.tab.active {
+    background: var(--gradient-accent);
+    color: var(--primary-dark);
+}
+
+/* ===== ИГРОВОЕ ПОЛЕ ===== */
+.board {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    grid-template-rows: repeat(10, 1fr);
+    gap: 2px;
+    width: 400px;
+    height: 400px;
+    background: rgba(100, 255, 218, 0.05);
+    border: 2px solid var(--accent-blue);
+    border-radius: 5px;
+    padding: 5px;
+}
+
+.cell {
+    background: rgba(100, 255, 218, 0.1);
+    border: 1px solid rgba(100, 255, 218, 0.2);
+    border-radius: 2px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.cell:hover {
+    background: rgba(100, 255, 218, 0.2);
+    transform: scale(1.05);
+}
+
+.cell.ship {
+    background: rgba(100, 255, 218, 0.3);
+    border-color: var(--accent-blue);
+}
+
+.cell.hit {
+    background: var(--gradient-danger);
+    animation: hitAnimation 0.5s ease;
+}
+
+.cell.miss {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.cell.sunk {
+    background: var(--gradient-danger);
+    animation: sinkAnimation 1s ease;
+}
+
+.cell.sunk::after {
+    content: '💥';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.5rem;
+}
+
+/* ===== АНИМАЦИИ ===== */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(30px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.8;
+    }
+}
+
+@keyframes wave {
+    0% {
+        background-position-x: 0;
+    }
+    100% {
+        background-position-x: 1200px;
+    }
+}
+
+@keyframes hitAnimation {
+    0% {
+        transform: scale(1);
+        box-shadow: 0 0 0 0 rgba(255, 107, 107, 0.7);
+    }
+    70% {
+        transform: scale(1.2);
+        box-shadow: 0 0 0 10px rgba(255, 107, 107, 0);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@keyframes sinkAnimation {
+    0% {
+        transform: rotate(0deg);
+    }
+    25% {
+        transform: rotate(-10deg);
+    }
+    75% {
+        transform: rotate(10deg);
+    }
+    100% {
+        transform: rotate(0deg);
+    }
+}
+
+/* Сонарная анимация для ожидания */
+.sonar {
+    position: relative;
+    width: 100px;
+    height: 100px;
+    margin: 0 auto 20px;
+}
+
+.sonar-wave {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 2px solid var(--accent-blue);
+    border-radius: 50%;
+    opacity: 0;
+    animation: sonar 2s linear infinite;
+}
+
+.sonar-wave:nth-child(2) {
+    animation-delay: 0.5s;
+}
+
+.sonar-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 20px;
+    height: 20px;
+    background: var(--gradient-accent);
+    border-radius: 50%;
+    animation: pulse 1s infinite;
+}
+
+@keyframes sonar {
+    0% {
+        transform: scale(0.5);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(2);
+        opacity: 0;
+    }
+}
+
+/* ===== ОРУЖИЕ ===== */
+.weapon-card {
+    background: var(--secondary-dark);
+    border-radius: 15px;
+    padding: 20px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+    position: relative;
+    overflow: hidden;
+}
+
+.weapon-card:hover {
+    transform: translateY(-5px);
+    border-color: var(--accent-blue);
+    box-shadow: var(--shadow-glow);
+}
+
+.weapon-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, 
+        transparent, 
+        rgba(100, 255, 218, 0.1), 
+        transparent);
+    transition: left 0.5s;
+}
+
+.weapon-card:hover::before {
+    left: 100%;
+}
+
+.weapon-card.active {
+    border-color: var(--accent-yellow);
+    background: rgba(255, 209, 102, 0.1);
+}
+
+/* ===== АДАПТИВНОСТЬ ===== */
+@media (max-width: 1200px) {
+    .board {
+        width: 350px;
+        height: 350px;
+    }
+}
+
+@media (max-width: 992px) {
+    .title-animation h1 {
+        font-size: 3rem;
+    }
+    
+    .board {
+        width: 300px;
+        height: 300px;
+    }
+    
+    .game-main {
+        flex-direction: column;
+    }
+}
+
+@media (max-width: 768px) {
+    .screen {
+        padding: 10px;
+    }
+    
+    .title-animation h1 {
+        font-size: 2.5rem;
+    }
+    
+    .board {
+        width: 280px;
+        height: 280px;
+    }
+    
+    .btn-primary, .btn-secondary {
+        padding: 12px 25px;
+        font-size: 1rem;
+    }
+}
+
+@media (max-width: 576px) {
+    .title-animation h1 {
+        font-size: 2rem;
+    }
+    
+    .subtitle {
+        font-size: 1rem;
+    }
+    
+    .board {
+        width: 250px;
+        height: 250px;
+    }
+    
+    .room-container {
+        padding: 20px;
+    }
+}
+
+/* ===== УТИЛИТЫ ===== */
+.hidden {
+    display: none !important;
+}
+
+.loading {
+    position: relative;
+}
+
+.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 30px;
+    height: 30px;
+    border: 3px solid var(--text-secondary);
+    border-top-color: var(--accent-blue);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: translate(-50%, -50%) rotate(360deg);
+    }
+}
+
+/* Полоса прокрутки */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--secondary-dark);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--accent-blue);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--gradient-accent);
+}
