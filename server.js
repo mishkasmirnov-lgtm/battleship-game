@@ -1,6 +1,7 @@
 const WebSocket = require('ws');
+const express = require('express');
 const http = require('http');
-const url = require('url');
+const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 // Константы сообщений
@@ -19,50 +20,24 @@ const MESSAGE_TYPES = {
     ROOM_JOINED: 'ROOM_JOINED',
     PLAYER_INFO: 'PLAYER_INFO',
     ROOM_INFO: 'ROOM_INFO',
-    PLAYERS_READY: 'PLAYERS_READY'
+    PLAYERS_READY: 'PLAYERS_READY',
+    CONNECTION_ESTABLISHED: 'CONNECTION_ESTABLISHED'
 };
 
 class GameServer {
-    constructor(port) {
-        this.port = port || 8080;
+    constructor() {
         this.rooms = new Map();
-        this.playerStats = new Map(); // Для хранения статистики
-        
-        this.server = http.createServer((req, res) => {
-            const parsedUrl = url.parse(req.url, true);
-            
-            if (parsedUrl.pathname === '/api/stats' && req.method === 'GET') {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                const stats = {};
-                this.playerStats.forEach((value, key) => {
-                    stats[key] = value;
-                });
-                res.end(JSON.stringify(stats));
-                return;
-            }
-            
-            if (parsedUrl.pathname === '/health' && req.method === 'GET') {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ status: 'ok', rooms: this.rooms.size }));
-                return;
-            }
-            
-            res.writeHead(404);
-            res.end();
-        });
-        
-        this.wss = new WebSocket.Server({ server: this.server });
-        
-        this.setupWebSocket();
-        console.log(`🚀 Game server started on port ${this.port}`);
+        this.playerStats = new Map();
+        this.wss = null;
     }
     
-    setupWebSocket() {
-        this.wss.on('connection', (ws, req) => {
+    setupWebSocket(wss) {
+        this.wss = wss;
+        
+        wss.on('connection', (ws, req) => {
             const playerId = uuidv4();
             console.log(`🔗 Новое подключение: ${playerId}`);
             
-            // Инициализируем статистику игрока
             if (!this.playerStats.has(playerId)) {
                 this.playerStats.set(playerId, {
                     wins: 0,
@@ -90,7 +65,10 @@ class GameServer {
                 this.handleDisconnect(playerId);
             });
             
-            // Отправляем ID игрока сразу после подключения
+            ws.on('error', (error) => {
+                console.error(`❌ WebSocket ошибка для ${playerId}:`, error);
+            });
+            
             ws.send(JSON.stringify({
                 type: 'CONNECTION_ESTABLISHED',
                 playerId: playerId,
@@ -187,7 +165,6 @@ class GameServer {
             return;
         }
         
-        // Добавляем второго игрока
         const playerNumber = 2;
         room.players.set(playerId, {
             id: playerId,
@@ -203,7 +180,6 @@ class GameServer {
         
         console.log(`👥 Игрок ${playerId} присоединился к комнате ${roomId}`);
         
-        // Отправляем подтверждение новому игроку
         ws.send(JSON.stringify({
             type: MESSAGE_TYPES.ROOM_JOINED,
             roomId: roomId,
@@ -211,7 +187,6 @@ class GameServer {
             playerId: playerId
         }));
         
-        // Уведомляем первого игрока о подключении второго
         const firstPlayer = Array.from(room.players.values())[0];
         if (firstPlayer.ws.readyState === WebSocket.OPEN) {
             firstPlayer.ws.send(JSON.stringify({
@@ -221,10 +196,8 @@ class GameServer {
             }));
         }
         
-        // Отправляем информацию о комнате обоим игрокам
         this.sendRoomInfo(room);
         
-        // АВТОМАТИЧЕСКИ начинаем игру при подключении второго игрока
         if (room.players.size === 2) {
             this.startGame(room);
         }
@@ -234,11 +207,9 @@ class GameServer {
         console.log(`🎲 Начинаем игру в комнате ${room.id}`);
         room.gameState = 'placing';
         
-        // Выбираем случайного игрока для первого хода
         const players = Array.from(room.players.values());
         room.currentTurn = players[Math.floor(Math.random() * players.length)].id;
         
-        // Уведомляем всех игроков о начале игры
         room.players.forEach((player, playerId) => {
             if (player.ws.readyState === WebSocket.OPEN) {
                 player.ws.send(JSON.stringify({
@@ -249,7 +220,6 @@ class GameServer {
             }
         });
         
-        // Даем 3 секунды на подготовку
         setTimeout(() => {
             this.checkAllShipsPlaced(room);
         }, 3000);
@@ -267,11 +237,9 @@ class GameServer {
         
         console.log(`✅ Игрок ${ws.playerId} готов в комнате ${room.id}`);
         
-        // Проверяем, готовы ли все игроки
         if (room.readyPlayers.size === 2) {
             console.log(`🎯 Все игроки готовы в комнате ${room.id}`);
             
-            // Если еще не начали игру, начинаем
             if (room.gameState === 'waiting') {
                 this.startGame(room);
             }
@@ -291,7 +259,6 @@ class GameServer {
         
         console.log(`🚢 Игрок ${ws.playerId} расставил корабли в комнате ${room.id}`);
         
-        // Проверяем, все ли расставили корабли
         this.checkAllShipsPlaced(room);
     }
     
@@ -300,7 +267,6 @@ class GameServer {
             room.gameState = 'playing';
             console.log(`⚔️ Все корабли расставлены, начинаем битву в ${room.id}`);
             
-            // Уведомляем о начале хода
             room.players.forEach((player, playerId) => {
                 if (player.ws.readyState === WebSocket.OPEN) {
                     player.ws.send(JSON.stringify({
@@ -335,7 +301,6 @@ class GameServer {
             return;
         }
         
-        // Проверяем попадание
         let hit = false;
         let sunk = false;
         let shipType = null;
@@ -346,7 +311,6 @@ class GameServer {
                     hit = true;
                     shipType = ship.type;
                     
-                    // Проверяем, потоплен ли корабль
                     if (!ship.hits) ship.hits = new Set();
                     ship.hits.add(`${x},${y}`);
                     
@@ -360,10 +324,8 @@ class GameServer {
             if (hit) break;
         }
         
-        // Меняем ход
         room.currentTurn = opponentId;
         
-        // Отправляем результат всем игрокам
         room.players.forEach((player, playerId) => {
             if (player.ws.readyState === WebSocket.OPEN) {
                 player.ws.send(JSON.stringify({
@@ -379,7 +341,6 @@ class GameServer {
             }
         });
         
-        // Проверяем конец игры
         this.checkGameOver(room, opponent);
     }
     
@@ -394,13 +355,11 @@ class GameServer {
             return;
         }
         
-        // Используем супер-оружие
         playerStats.superWeapon = false;
         
         const opponentId = this.getOpponentId(room, ws.playerId);
         const opponent = room.players.get(opponentId);
         
-        // Помечаем все корабли противника как потопленные
         if (opponent.ships) {
             opponent.ships.forEach(ship => {
                 ship.sunk = true;
@@ -408,7 +367,6 @@ class GameServer {
             });
         }
         
-        // Конец игры
         this.endGame(room, ws.playerId, 'nuclear');
     }
     
@@ -426,7 +384,6 @@ class GameServer {
     endGame(room, winnerId, reason) {
         room.gameState = 'finished';
         
-        // Обновляем статистику
         room.players.forEach((player, playerId) => {
             const stats = this.playerStats.get(playerId);
             if (!stats) return;
@@ -436,7 +393,6 @@ class GameServer {
             if (playerId === winnerId) {
                 stats.wins++;
                 
-                // Проверяем, достиг ли игрок 10 побед
                 if (stats.wins >= 10 && !stats.superWeapon) {
                     stats.superWeapon = true;
                 }
@@ -447,7 +403,6 @@ class GameServer {
             this.playerStats.set(playerId, stats);
         });
         
-        // Уведомляем всех игроков
         room.players.forEach((player, playerId) => {
             if (player.ws.readyState === WebSocket.OPEN) {
                 player.ws.send(JSON.stringify({
@@ -459,7 +414,6 @@ class GameServer {
             }
         });
         
-        // Чистим комнату через 30 секунд
         setTimeout(() => {
             if (this.rooms.has(room.id)) {
                 this.rooms.delete(room.id);
@@ -477,7 +431,6 @@ class GameServer {
         
         player.playerName = message.playerName || player.playerName;
         
-        // Уведомляем других игроков
         room.players.forEach((p, id) => {
             if (id !== ws.playerId && p.ws.readyState === WebSocket.OPEN) {
                 p.ws.send(JSON.stringify({
@@ -532,7 +485,6 @@ class GameServer {
             if (room.players.has(playerId)) {
                 console.log(`💥 Игрок ${playerId} отключился из комнаты ${roomId}`);
                 
-                // Уведомляем другого игрока
                 room.players.forEach((player, id) => {
                     if (id !== playerId && player.ws.readyState === WebSocket.OPEN) {
                         player.ws.send(JSON.stringify({
@@ -542,7 +494,6 @@ class GameServer {
                     }
                 });
                 
-                // Удаляем комнату
                 this.rooms.delete(roomId);
                 break;
             }
@@ -559,12 +510,67 @@ class GameServer {
     }
 }
 
-// Запуск сервера
-const PORT = process.env.PORT || 8080;
-const server = new GameServer(PORT);
+// ==================== ОСНОВНОЙ СЕРВЕР ====================
 
-server.server.listen(PORT, () => {
+const PORT = process.env.PORT || 10000;
+const app = express();
+const server = http.createServer(app);
+
+// Раздача статических файлов из папки 'public'
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Роут для главной страницы
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Health check
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// API для статистики
+app.get('/api/stats', (req, res) => {
+    const gameServer = wss.getGameServer();
+    const stats = {};
+    if (gameServer && gameServer.playerStats) {
+        gameServer.playerStats.forEach((value, key) => {
+            stats[key] = value;
+        });
+    }
+    res.json(stats);
+});
+
+// Создаем WebSocket сервер
+const wss = new WebSocket.Server({ server });
+
+// Создаем игровой сервер
+const gameServer = new GameServer();
+gameServer.setupWebSocket(wss);
+
+// Сохраняем ссылку на игровой сервер для API
+wss.getGameServer = () => gameServer;
+
+// Запускаем сервер
+server.listen(PORT, () => {
+    console.log(`🚀 Game server started on port ${PORT}`);
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
     console.log(`📊 API статистики: http://localhost:${PORT}/api/stats`);
     console.log(`❤️  Health check: http://localhost:${PORT}/health`);
+    console.log(`🌐 Веб-интерфейс: http://localhost:${PORT}/`);
+    console.log(`🔌 WebSocket: ws://localhost:${PORT}/`);
+});
+
+// Обработка ошибок сервера
+server.on('error', (error) => {
+    console.error('❌ Ошибка сервера:', error);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('🛑 Получен SIGTERM, закрываю сервер...');
+    server.close(() => {
+        console.log('✅ Сервер закрыт');
+        process.exit(0);
+    });
 });
