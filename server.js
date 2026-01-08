@@ -17,7 +17,9 @@ const MESSAGE_TYPES = {
     GAME_OVER: 'GAME_OVER',
     ERROR: 'ERROR',
     ROOM_INFO: 'ROOM_INFO',
-    PLAYER_READY: 'PLAYER_READY'
+    PLAYER_READY: 'PLAYER_READY',
+    UPDATE_STATS: 'UPDATE_STATS',
+    PLAYER_LEFT: 'PLAYER_LEFT'
 };
 
 class GameServer {
@@ -25,7 +27,6 @@ class GameServer {
         this.rooms = new Map();
         this.playerStats = new Map();
         this.wss = null;
-        this.heartbeatInterval = null;
     }
 
     setupWebSocket(wss) {
@@ -37,8 +38,6 @@ class GameServer {
 
             ws.playerId = playerId;
             ws.roomId = null;
-            ws.isAlive = true;
-            ws.lastActivity = Date.now();
 
             if (!this.playerStats.has(playerId)) {
                 this.playerStats.set(playerId, {
@@ -50,20 +49,9 @@ class GameServer {
                 });
             }
 
-            ws.on('pong', () => {
-                ws.isAlive = true;
-            });
-
             ws.on('message', (data) => {
                 try {
                     const message = JSON.parse(data.toString());
-                    ws.lastActivity = Date.now();
-
-                    if (message.type === 'PING') {
-                        ws.send(JSON.stringify({ type: 'PONG' }));
-                        return;
-                    }
-
                     this.handleMessage(ws, message);
                 } catch (error) {
                     console.error('❌ Ошибка парсинга:', error);
@@ -77,7 +65,7 @@ class GameServer {
             });
 
             ws.on('error', (error) => {
-                console.error(`❌ Ошибка WebSocket:`, error);
+                console.error(`❌ WebSocket ошибка:`, error);
             });
 
             ws.send(JSON.stringify({
@@ -86,21 +74,6 @@ class GameServer {
                 stats: this.playerStats.get(playerId)
             }));
         });
-
-        this.heartbeatInterval = setInterval(() => {
-            wss.clients.forEach((ws) => {
-                if (ws.isAlive === false) {
-                    console.log(`💔 Соединение разорвано: ${ws.playerId}`);
-                    this.handleDisconnect(ws.playerId);
-                    return ws.terminate();
-                }
-
-                ws.isAlive = false;
-                try {
-                    ws.ping();
-                } catch (e) {}
-            });
-        }, 30000);
     }
 
     handleMessage(ws, message) {
@@ -154,8 +127,7 @@ class GameServer {
             currentTurn: null,
             readyPlayers: new Set(),
             shipsPlaced: new Set(),
-            createdAt: Date.now(),
-            lastActivity: Date.now()
+            createdAt: Date.now()
         };
 
         if (playerName) {
@@ -172,7 +144,7 @@ class GameServer {
             shipsPlaced: false,
             ships: [],
             playerName: playerName || this.playerStats.get(playerId).playerName,
-            connectedAt: Date.now()
+            board: this.createEmptyBoard()
         });
 
         this.rooms.set(roomId, room);
@@ -193,7 +165,7 @@ class GameServer {
         const playerId = ws.playerId;
 
         if (!roomId || roomId.length !== 4) {
-            this.sendError(ws, 'Неверный ID комнаты');
+            this.sendError(ws, 'Неверный ID комнаты (4 цифры)');
             return;
         }
 
@@ -236,11 +208,10 @@ class GameServer {
             shipsPlaced: false,
             ships: [],
             playerName: actualPlayerName,
-            connectedAt: Date.now()
+            board: this.createEmptyBoard()
         });
 
         ws.roomId = roomId;
-        room.lastActivity = Date.now();
 
         console.log(`👥 Игрок ${playerId} присоединился к комнате ${roomId}`);
 
@@ -297,7 +268,6 @@ class GameServer {
 
         player.ready = true;
         room.readyPlayers.add(ws.playerId);
-        room.lastActivity = Date.now();
 
         console.log(`✅ Игрок ${ws.playerId} готов`);
 
@@ -324,14 +294,61 @@ class GameServer {
         const player = room.players.get(ws.playerId);
         if (!player) return;
 
-        player.ships = ships || [];
+        // Проверяем корабли по правилам морского боя
+        const validatedShips = this.validateShips(ships);
+        if (!validatedShips) {
+            this.sendError(ws, 'Некорректная расстановка кораблей');
+            return;
+        }
+
+        player.ships = validatedShips;
         player.shipsPlaced = true;
         room.shipsPlaced.add(ws.playerId);
-        room.lastActivity = Date.now();
 
-        console.log(`🚢 Игрок ${ws.playerId} расставил корабли`);
+        console.log(`🚢 Игрок ${ws.playerId} расставил ${player.ships.length} кораблей`);
+
+        // Обновляем доску игрока
+        player.board = this.createEmptyBoard();
+        player.ships.forEach(ship => {
+            ship.coordinates.forEach(coord => {
+                player.board[coord.y][coord.x] = ship.type;
+            });
+        });
 
         this.checkAllShipsPlaced(room);
+    }
+
+    validateShips(ships) {
+        if (!Array.isArray(ships)) return null;
+        
+        // Правила: 1x4, 2x3, 3x2, 4x1
+        const shipCounts = {
+            'battleship': 1,    // 4-палубный
+            'cruiser': 2,       // 3-палубные
+            'destroyer': 3,     // 2-палубные
+            'submarine': 4      // 1-палубные
+        };
+
+        const actualCounts = {};
+        ships.forEach(ship => {
+            actualCounts[ship.type] = (actualCounts[ship.type] || 0) + 1;
+        });
+
+        // Проверяем количество кораблей каждого типа
+        for (const [type, count] of Object.entries(shipCounts)) {
+            if ((actualCounts[type] || 0) !== count) {
+                console.log(`❌ Неправильное количество кораблей типа ${type}: ${actualCounts[type] || 0} вместо ${count}`);
+                return null;
+            }
+        }
+
+        // Проверяем, что всего 10 кораблей
+        if (ships.length !== 10) {
+            console.log(`❌ Всего кораблей: ${ships.length} вместо 10`);
+            return null;
+        }
+
+        return ships;
     }
 
     checkAllShipsPlaced(room) {
@@ -374,24 +391,41 @@ class GameServer {
             return;
         }
 
+        // Проверяем, не стреляли ли уже сюда
+        if (attacker.shots) {
+            const shotKey = `${x},${y}`;
+            if (attacker.shots.has(shotKey)) {
+                this.sendError(ws, 'Уже стреляли сюда');
+                return;
+            }
+        } else {
+            attacker.shots = new Set();
+        }
+
         let hit = false;
         let sunk = false;
         let shipType = null;
+        let shipSunk = null;
 
+        // Проверяем попадание
         for (const ship of opponent.ships) {
             for (const coord of ship.coordinates) {
                 if (coord.x === x && coord.y === y) {
                     hit = true;
                     shipType = ship.type;
 
+                    // Отмечаем попадание
                     if (!ship.hits) ship.hits = [];
                     if (!ship.hits.includes(`${x},${y}`)) {
                         ship.hits.push(`${x},${y}`);
+                        attacker.shots.add(`${x},${y}`);
                     }
 
+                    // Проверяем, потоплен ли корабль
                     if (ship.hits.length === ship.coordinates.length) {
                         sunk = true;
                         ship.sunk = true;
+                        shipSunk = ship;
                         console.log(`💥 Корабль ${ship.type} потоплен!`);
                     }
                     break;
@@ -400,13 +434,22 @@ class GameServer {
             if (hit) break;
         }
 
-        room.currentTurn = opponentId;
-        room.lastActivity = Date.now();
+        // Если не попали, отмечаем промах
+        if (!hit) {
+            attacker.shots.add(`${x},${y}`);
+        }
 
-        console.log(`🎯 Выстрел в (${x},${y}): ${hit ? 'ПОПАДАНИЕ' : 'ПРОМАХ'}`);
+        // Меняем ход только если не потопили корабль
+        if (!sunk) {
+            room.currentTurn = opponentId;
+        }
 
+        console.log(`🎯 ${attacker.playerName} выстрелил в (${x},${y}): ${hit ? 'ПОПАДАНИЕ' : 'ПРОМАХ'} ${sunk ? 'КОРАБЛЬ ПОТОПЛЕН' : ''}`);
+
+        // Отправляем результат обоим игрокам
         room.players.forEach((player, playerId) => {
             if (player.ws.readyState === WebSocket.OPEN) {
+                const isAttacker = playerId === ws.playerId;
                 player.ws.send(JSON.stringify({
                     type: 'SHOT_RESULT',
                     x: x,
@@ -416,12 +459,16 @@ class GameServer {
                     shipType: shipType,
                     playerId: ws.playerId,
                     yourTurn: room.currentTurn === playerId,
-                    message: hit ? (sunk ? `Потоплен ${shipType}!` : 'Попадание!') : 'Промах!'
+                    message: hit ? 
+                        (sunk ? `Потоплен ${this.getShipName(shipType)}!` : 'Попадание!') : 
+                        'Промах!',
+                    isYourShot: isAttacker
                 }));
             }
         });
 
-        if (hit) {
+        // Проверяем конец игры
+        if (hit && sunk) {
             this.checkGameOver(room, opponent);
         }
     }
@@ -443,8 +490,9 @@ class GameServer {
         const opponentId = this.getOpponentId(room, ws.playerId);
         const opponent = room.players.get(opponentId);
 
-        console.log(`💣 Ядерная бомба использована в комнате ${room.id}!`);
+        console.log(`💣 ${ws.playerId} использовал ЯДЕРНУЮ БОМБУ в комнате ${room.id}!`);
 
+        // Помечаем все корабли противника как потопленные
         if (opponent.ships) {
             opponent.ships.forEach(ship => {
                 ship.sunk = true;
@@ -452,6 +500,7 @@ class GameServer {
             });
         }
 
+        // Немедленно заканчиваем игру
         this.endGame(room, ws.playerId, 'nuclear');
     }
 
@@ -469,8 +518,8 @@ class GameServer {
 
     endGame(room, winnerId, reason) {
         room.gameState = 'finished';
-        room.lastActivity = Date.now();
 
+        // Обновляем статистику
         room.players.forEach((player, playerId) => {
             const stats = this.playerStats.get(playerId);
             if (!stats) return;
@@ -480,6 +529,7 @@ class GameServer {
             if (playerId === winnerId) {
                 stats.wins++;
 
+                // Проверяем, достиг ли игрок 10 побед
                 if (stats.wins >= 10 && !stats.superWeapon) {
                     stats.superWeapon = true;
                     console.log(`🎉 Игрок ${playerId} разблокировал ЯДЕРНУЮ БОМБУ!`);
@@ -489,10 +539,19 @@ class GameServer {
             }
 
             this.playerStats.set(playerId, stats);
+
+            // Отправляем обновленную статистику
+            if (player.ws.readyState === WebSocket.OPEN) {
+                player.ws.send(JSON.stringify({
+                    type: 'UPDATE_STATS',
+                    stats: this.playerStats.get(playerId)
+                }));
+            }
         });
 
-        console.log(`🏁 Конец игры. Причина: ${reason}`);
+        console.log(`🏁 Конец игры в ${room.id}. Причина: ${reason}`);
 
+        // Уведомляем всех игроков
         room.players.forEach((player, playerId) => {
             if (player.ws.readyState === WebSocket.OPEN) {
                 player.ws.send(JSON.stringify({
@@ -506,12 +565,13 @@ class GameServer {
             }
         });
 
+        // Чистим комнату через 30 секунд
         setTimeout(() => {
             if (this.rooms.has(room.id)) {
                 console.log(`🧹 Очистка комнаты ${room.id}`);
                 this.rooms.delete(room.id);
             }
-        }, 60000);
+        }, 30000);
     }
 
     handlePlayerInfo(ws, message) {
@@ -613,6 +673,20 @@ class GameServer {
             }
         }
         return null;
+    }
+
+    createEmptyBoard() {
+        return Array(10).fill().map(() => Array(10).fill(0));
+    }
+
+    getShipName(type) {
+        const names = {
+            'battleship': 'Линкор',
+            'cruiser': 'Крейсер', 
+            'destroyer': 'Эсминец',
+            'submarine': 'Подлодка'
+        };
+        return names[type] || type;
     }
 
     handleDisconnect(playerId) {
