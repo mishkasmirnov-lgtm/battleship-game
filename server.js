@@ -294,7 +294,6 @@ class GameServer {
         const player = room.players.get(ws.playerId);
         if (!player) return;
 
-        // Проверяем корабли по правилам морского боя
         const validatedShips = this.validateShips(ships);
         if (!validatedShips) {
             this.sendError(ws, 'Некорректная расстановка кораблей');
@@ -307,7 +306,6 @@ class GameServer {
 
         console.log(`🚢 Игрок ${ws.playerId} расставил ${player.ships.length} кораблей`);
 
-        // Обновляем доску игрока
         player.board = this.createEmptyBoard();
         player.ships.forEach(ship => {
             ship.coordinates.forEach(coord => {
@@ -321,12 +319,11 @@ class GameServer {
     validateShips(ships) {
         if (!Array.isArray(ships)) return null;
         
-        // Правила: 1x4, 2x3, 3x2, 4x1
         const shipCounts = {
-            'battleship': 1,    // 4-палубный
-            'cruiser': 2,       // 3-палубные
-            'destroyer': 3,     // 2-палубные
-            'submarine': 4      // 1-палубные
+            'battleship': 1,
+            'cruiser': 2,
+            'destroyer': 3,
+            'submarine': 4
         };
 
         const actualCounts = {};
@@ -334,7 +331,6 @@ class GameServer {
             actualCounts[ship.type] = (actualCounts[ship.type] || 0) + 1;
         });
 
-        // Проверяем количество кораблей каждого типа
         for (const [type, count] of Object.entries(shipCounts)) {
             if ((actualCounts[type] || 0) !== count) {
                 console.log(`❌ Неправильное количество кораблей типа ${type}: ${actualCounts[type] || 0} вместо ${count}`);
@@ -342,7 +338,6 @@ class GameServer {
             }
         }
 
-        // Проверяем, что всего 10 кораблей
         if (ships.length !== 10) {
             console.log(`❌ Всего кораблей: ${ships.length} вместо 10`);
             return null;
@@ -391,7 +386,6 @@ class GameServer {
             return;
         }
 
-        // Проверяем, не стреляли ли уже сюда
         if (attacker.shots) {
             const shotKey = `${x},${y}`;
             if (attacker.shots.has(shotKey)) {
@@ -405,27 +399,22 @@ class GameServer {
         let hit = false;
         let sunk = false;
         let shipType = null;
-        let shipSunk = null;
 
-        // Проверяем попадание
         for (const ship of opponent.ships) {
             for (const coord of ship.coordinates) {
                 if (coord.x === x && coord.y === y) {
                     hit = true;
                     shipType = ship.type;
 
-                    // Отмечаем попадание
                     if (!ship.hits) ship.hits = [];
                     if (!ship.hits.includes(`${x},${y}`)) {
                         ship.hits.push(`${x},${y}`);
                         attacker.shots.add(`${x},${y}`);
                     }
 
-                    // Проверяем, потоплен ли корабль
                     if (ship.hits.length === ship.coordinates.length) {
                         sunk = true;
                         ship.sunk = true;
-                        shipSunk = ship;
                         console.log(`💥 Корабль ${ship.type} потоплен!`);
                     }
                     break;
@@ -434,19 +423,16 @@ class GameServer {
             if (hit) break;
         }
 
-        // Если не попали, отмечаем промах
         if (!hit) {
             attacker.shots.add(`${x},${y}`);
         }
 
-        // Меняем ход только если не потопили корабль
         if (!sunk) {
             room.currentTurn = opponentId;
         }
 
         console.log(`🎯 ${attacker.playerName} выстрелил в (${x},${y}): ${hit ? 'ПОПАДАНИЕ' : 'ПРОМАХ'} ${sunk ? 'КОРАБЛЬ ПОТОПЛЕН' : ''}`);
 
-        // Отправляем результат обоим игрокам
         room.players.forEach((player, playerId) => {
             if (player.ws.readyState === WebSocket.OPEN) {
                 const isAttacker = playerId === ws.playerId;
@@ -467,7 +453,6 @@ class GameServer {
             }
         });
 
-        // Проверяем конец игры
         if (hit && sunk) {
             this.checkGameOver(room, opponent);
         }
@@ -492,7 +477,6 @@ class GameServer {
 
         console.log(`💣 ${ws.playerId} использовал ЯДЕРНУЮ БОМБУ в комнате ${room.id}!`);
 
-        // Помечаем все корабли противника как потопленные
         if (opponent.ships) {
             opponent.ships.forEach(ship => {
                 ship.sunk = true;
@@ -500,7 +484,6 @@ class GameServer {
             });
         }
 
-        // Немедленно заканчиваем игру
         this.endGame(room, ws.playerId, 'nuclear');
     }
 
@@ -519,7 +502,6 @@ class GameServer {
     endGame(room, winnerId, reason) {
         room.gameState = 'finished';
 
-        // Обновляем статистику
         room.players.forEach((player, playerId) => {
             const stats = this.playerStats.get(playerId);
             if (!stats) return;
@@ -529,7 +511,6 @@ class GameServer {
             if (playerId === winnerId) {
                 stats.wins++;
 
-                // Проверяем, достиг ли игрок 10 побед
                 if (stats.wins >= 10 && !stats.superWeapon) {
                     stats.superWeapon = true;
                     console.log(`🎉 Игрок ${playerId} разблокировал ЯДЕРНУЮ БОМБУ!`);
@@ -540,7 +521,6 @@ class GameServer {
 
             this.playerStats.set(playerId, stats);
 
-            // Отправляем обновленную статистику
             if (player.ws.readyState === WebSocket.OPEN) {
                 player.ws.send(JSON.stringify({
                     type: 'UPDATE_STATS',
@@ -551,7 +531,6 @@ class GameServer {
 
         console.log(`🏁 Конец игры в ${room.id}. Причина: ${reason}`);
 
-        // Уведомляем всех игроков
         room.players.forEach((player, playerId) => {
             if (player.ws.readyState === WebSocket.OPEN) {
                 player.ws.send(JSON.stringify({
@@ -565,7 +544,6 @@ class GameServer {
             }
         });
 
-        // Чистим комнату через 30 секунд
         setTimeout(() => {
             if (this.rooms.has(room.id)) {
                 console.log(`🧹 Очистка комнаты ${room.id}`);
@@ -746,11 +724,59 @@ app.get('/', (req, res) => {
         res.send(`
             <!DOCTYPE html>
             <html>
-            <head><title>Морской Бой</title><style>body{font-family:Arial;padding:40px;text-align:center;}</style></head>
+            <head>
+                <title>Морской Бой</title>
+                <style>
+                    body {
+                        font-family: Arial, sans-serif;
+                        padding: 40px;
+                        text-align: center;
+                        background: linear-gradient(135deg, #0c2461, #1e3799);
+                        color: white;
+                        min-height: 100vh;
+                    }
+                    h1 {
+                        color: #4a69bd;
+                        font-size: 3em;
+                        margin-bottom: 20px;
+                    }
+                    .container {
+                        max-width: 600px;
+                        margin: 0 auto;
+                        padding: 30px;
+                        background: rgba(255, 255, 255, 0.1);
+                        border-radius: 15px;
+                        backdrop-filter: blur(10px);
+                    }
+                    .btn {
+                        display: inline-block;
+                        padding: 15px 30px;
+                        background: linear-gradient(135deg, #4a69bd, #6a89cc);
+                        color: white;
+                        text-decoration: none;
+                        border-radius: 10px;
+                        margin: 10px;
+                        font-size: 1.1em;
+                        border: none;
+                        cursor: pointer;
+                        transition: all 0.3s ease;
+                    }
+                    .btn:hover {
+                        transform: translateY(-2px);
+                        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
+                    }
+                </style>
+            </head>
             <body>
-                <h1>🚢 Морской Бой</h1>
-                <p>Сервер работает! Загрузите файлы игры.</p>
-                <a href="/health">Health Check</a>
+                <div class="container">
+                    <h1>🚢 Морской Бой</h1>
+                    <p>Сервер запущен и работает!</p>
+                    <p>Игра загружается...</p>
+                    <div style="margin-top: 30px;">
+                        <button class="btn" onclick="window.location.reload()">Обновить страницу</button>
+                        <a href="/health" class="btn">Проверить Health</a>
+                    </div>
+                </div>
             </body>
             </html>
         `);
@@ -758,7 +784,13 @@ app.get('/', (req, res) => {
 });
 
 app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ 
+        status: 'ok', 
+        timestamp: new Date().toISOString(),
+        server: 'Battleship Game Server',
+        version: '1.0.0',
+        uptime: process.uptime()
+    });
 });
 
 app.get('/api/stats', (req, res) => {
@@ -773,22 +805,53 @@ const wss = new WebSocket.Server({ server });
 const gameServer = new GameServer();
 gameServer.setupWebSocket(wss);
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`
 ╔══════════════════════════════════════════════════════════╗
 ║                🚀 МОРСКОЙ БОЙ СЕРВЕР                    ║
 ╠══════════════════════════════════════════════════════════╣
 ║ Порт: ${PORT}                                            ║
-║ URL: http://localhost:${PORT}/                           ║
-║ WebSocket: ws://localhost:${PORT}/                       ║
+║ URL: http://0.0.0.0:${PORT}/                            ║
+║ WebSocket: ws://0.0.0.0:${PORT}/                        ║
+║ Health: http://0.0.0.0:${PORT}/health                   ║
 ╚══════════════════════════════════════════════════════════╝
     `);
+    console.log('✅ Сервер успешно запущен!');
+    console.log('📋 Ожидание подключений игроков...');
 });
 
-process.on('SIGTERM', () => {
-    console.log('🛑 Закрываю сервер...');
+// Убираем обработку SIGTERM, чтобы сервер не закрывался сразу
+// process.on('SIGTERM', () => {
+//     console.log('\n🛑 Получен SIGTERM, закрываю сервер...');
+//     
+//     wss.clients.forEach((client) => {
+//         client.close();
+//     });
+//     
+//     server.close(() => {
+//         console.log('✅ Сервер корректно закрыт');
+//         process.exit(0);
+//     });
+//     
+//     setTimeout(() => {
+//         console.log('⚠️ Принудительное завершение');
+//         process.exit(1);
+//     }, 5000);
+// });
+
+// Вместо этого добавляем обработку сигналов по-другому
+process.on('SIGINT', () => {
+    console.log('\n🛑 Получен SIGINT, закрываю сервер...');
     server.close(() => {
         console.log('✅ Сервер закрыт');
         process.exit(0);
     });
+});
+
+process.on('uncaughtException', (error) => {
+    console.error('❌ Необработанное исключение:', error);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Необработанный rejection:', reason);
 });
