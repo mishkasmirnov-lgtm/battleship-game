@@ -1,734 +1,570 @@
-// server.js - ПОЛНЫЙ исправленный файл
 const WebSocket = require('ws');
 const http = require('http');
 const url = require('url');
-const path = require('path');
-const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
 
-// Создаем HTTP сервер, который отдает файлы
-const server = http.createServer((req, res) => {
-    // Логируем запрос для отладки
-    console.log(`HTTP запрос: ${req.url}`);
-    
-    // Определяем путь к файлу
-    let filePath = '.' + req.url;
-    if (filePath === './') {
-        filePath = './index.html';
-    }
-    
-    // Получаем расширение файла для правильного Content-Type
-    const extname = path.extname(filePath);
-    let contentType = 'text/html';
-    
-    switch (extname) {
-        case '.js':
-            contentType = 'application/javascript';
-            break;
-        case '.css':
-            contentType = 'text/css';
-            break;
-        case '.json':
-            contentType = 'application/json';
-            break;
-        case '.png':
-            contentType = 'image/png';
-            break;
-        case '.jpg':
-            contentType = 'image/jpg';
-            break;
-        case '.ico':
-            contentType = 'image/x-icon';
-            break;
-    }
-    
-    // Читаем файл
-    fs.readFile(path.join(__dirname, filePath), (error, content) => {
-        if (error) {
-            if (error.code === 'ENOENT') {
-                // Файл не найден
-                res.writeHead(404, { 'Content-Type': 'text/html' });
-                res.end('404: Страница не найдена', 'utf-8');
-            } else {
-                // Другая ошибка сервера
-                res.writeHead(500);
-                res.end(`Ошибка сервера: ${error.code}`, 'utf-8');
-            }
-        } else {
-            // Успешно - отдаем файл
-            res.writeHead(200, { 'Content-Type': contentType });
-            res.end(content, 'utf-8');
-        }
-    });
-});
-
-// Создаем WebSocket сервер на том же HTTP сервере
-const wss = new WebSocket.Server({ server });
-
-// Хранилище игровых комнат
-const rooms = new Map();
-// Хранилище соединений игроков
-const connections = new Map();
-
-// Типы сообщений для клиента
+// Константы сообщений
 const MESSAGE_TYPES = {
-    ROOM_CREATED: 'ROOM_CREATED',
-    ROOM_JOINED: 'ROOM_JOINED',
+    PLAYER_CONNECTED: 'PLAYER_CONNECTED',
     PLAYER_READY: 'PLAYER_READY',
     GAME_START: 'GAME_START',
+    SHIPS_PLACED: 'SHIPS_PLACED',
     PLAYER_TURN: 'PLAYER_TURN',
+    FIRE_SHOT: 'FIRE_SHOT',
     SHOT_RESULT: 'SHOT_RESULT',
     GAME_OVER: 'GAME_OVER',
-    CHAT_MESSAGE: 'CHAT_MESSAGE',
-    PLAYER_DISCONNECTED: 'PLAYER_DISCONNECTED',
-    SPECIAL_WEAPON_USED: 'SPECIAL_WEAPON_USED',
-    SHIPS_PLACED: 'SHIPS_PLACED',
     ERROR: 'ERROR',
-    PLAYER_CONNECTED: 'PLAYER_CONNECTED',
-    PLAYER_INFO: 'PLAYER_INFO'
+    ROOM_CREATED: 'ROOM_CREATED',
+    JOIN_ROOM: 'JOIN_ROOM',
+    ROOM_JOINED: 'ROOM_JOINED',
+    PLAYER_INFO: 'PLAYER_INFO',
+    ROOM_INFO: 'ROOM_INFO',
+    PLAYERS_READY: 'PLAYERS_READY'
 };
 
-// Конфигурация кораблей
-const SHIP_CONFIG = [
-    { size: 4, count: 1 }, // 1 четырехпалубный
-    { size: 3, count: 2 }, // 2 трехпалубных
-    { size: 2, count: 3 }, // 3 двухпалубных
-    { size: 1, count: 4 }  // 4 однопалубных
-];
-
-wss.on('connection', (ws, req) => {
-    console.log(`Новое WebSocket подключение: ${req.url}`);
-    
-    // Парсим URL для получения параметра room
-    const parsedUrl = url.parse(req.url, true);
-    const query = parsedUrl.query;
-    let roomId = query.room;
-    
-    // Если room не указан - создаем новую комнату
-    if (!roomId) {
-        roomId = generateRoomId();
-        console.log(`Создана новая комната: ${roomId}`);
-    } else {
-        roomId = roomId.toUpperCase();
-        console.log(`Попытка подключения к комнате: ${roomId}`);
-    }
-    
-    const playerId = generatePlayerId();
-    
-    // Сохраняем связь игрока с комнатой
-    connections.set(ws, { playerId, roomId });
-    
-    // Получаем или создаем комнату
-    let room = rooms.get(roomId);
-    if (!room) {
-        room = {
-            id: roomId,
-            players: new Map(),
-            gameState: 'waiting', // waiting, placing, playing, finished
-            currentTurn: null,
-            boards: new Map(),
-            shots: new Map(),
-            specialWeapons: new Map(),
-            hostId: playerId,  // Первый игрок становится хостом
-            chatHistory: []    // История чата комнаты
-        };
-        rooms.set(roomId, room);
-        console.log(`Создана новая комната ${roomId}, хост: ${playerId}`);
-    }
-    
-    // Проверяем, можно ли присоединиться к комнате
-    if (room.players.size >= 2) {
-        ws.send(JSON.stringify({
-            type: MESSAGE_TYPES.ERROR,
-            message: 'Комната заполнена'
-        }));
-        console.log(`Комната ${roomId} заполнена, отказ для игрока ${playerId}`);
-        ws.close();
-        return;
-    }
-    
-    // Определяем номер игрока (1 или 2)
-    const playerNumber = room.players.size + 1;
-    const isHost = playerId === room.hostId;
-    
-    const player = {
-        id: playerId,
-        number: playerNumber,
-        ws: ws,
-        ready: false,
-        shipsPlaced: false,
-        ships: [],
-        specialWeapons: {
-            bomb: 2,    // 2 бомбы на игру
-            radar: 1    // 1 радар на игру
-        },
-        isHost: isHost,
-        playerName: `Игрок ${playerNumber}`
-    };
-    
-    room.players.set(playerId, player);
-    room.boards.set(playerId, createEmptyBoard());
-    room.shots.set(playerId, createEmptyBoard());
-    room.specialWeapons.set(playerId, { ...player.specialWeapons });
-    
-    console.log(`Игрок ${playerId} добавлен в комнату ${roomId} как игрок ${playerNumber} (хост: ${isHost})`);
-    
-    // Отправляем игроку информацию о комнате
-    if (isHost) {
-        // Для хоста - создание комнаты
-        ws.send(JSON.stringify({
-            type: MESSAGE_TYPES.ROOM_CREATED,
-            roomId,
-            playerId,
-            playerNumber,
-            shipConfig: SHIP_CONFIG,
-            opponentConnected: false
-        }));
+class GameServer {
+    constructor(port) {
+        this.port = port || 8080;
+        this.rooms = new Map();
+        this.playerStats = new Map(); // Для хранения статистики
         
-        // Отправляем историю чата новому хосту
-        if (room.chatHistory.length > 0) {
-            room.chatHistory.forEach(chatMessage => {
-                ws.send(JSON.stringify(chatMessage));
-            });
-        }
-    } else {
-        // Для присоединяющегося игрока - подтверждение подключения
-        ws.send(JSON.stringify({
-            type: MESSAGE_TYPES.ROOM_JOINED,
-            roomId,
-            playerId,
-            playerNumber,
-            shipConfig: SHIP_CONFIG,
-            opponentConnected: true
-        }));
+        this.server = http.createServer((req, res) => {
+            const parsedUrl = url.parse(req.url, true);
+            
+            if (parsedUrl.pathname === '/api/stats' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                const stats = {};
+                this.playerStats.forEach((value, key) => {
+                    stats[key] = value;
+                });
+                res.end(JSON.stringify(stats));
+                return;
+            }
+            
+            if (parsedUrl.pathname === '/health' && req.method === 'GET') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ status: 'ok', rooms: this.rooms.size }));
+                return;
+            }
+            
+            res.writeHead(404);
+            res.end();
+        });
         
-        // Уведомляем хоста о подключении второго игрока
-        const host = room.players.get(room.hostId);
-        if (host && host.ws.readyState === WebSocket.OPEN) {
-            // Уведомляем хоста о новом игроке
-            host.ws.send(JSON.stringify({
-                type: MESSAGE_TYPES.PLAYER_CONNECTED,
-                playerNumber: playerNumber,
-                playerName: player.playerName
-            }));
+        this.wss = new WebSocket.Server({ server: this.server });
+        
+        this.setupWebSocket();
+        console.log(`🚀 Game server started on port ${this.port}`);
+    }
+    
+    setupWebSocket() {
+        this.wss.on('connection', (ws, req) => {
+            const playerId = uuidv4();
+            console.log(`🔗 Новое подключение: ${playerId}`);
             
-            // Уведомляем второго игрока о хосте
-            ws.send(JSON.stringify({
-                type: MESSAGE_TYPES.PLAYER_CONNECTED,
-                playerNumber: 1,
-                playerName: host.playerName
-            }));
-            
-            // Отправляем историю чата новому игроку
-            if (room.chatHistory.length > 0) {
-                room.chatHistory.forEach(chatMessage => {
-                    ws.send(JSON.stringify(chatMessage));
+            // Инициализируем статистику игрока
+            if (!this.playerStats.has(playerId)) {
+                this.playerStats.set(playerId, {
+                    wins: 0,
+                    losses: 0,
+                    superWeapon: false,
+                    totalGames: 0
                 });
             }
             
-            console.log(`Уведомления отправлены в комнате ${roomId}: игрок 1 и игрок ${playerNumber} подключены`);
-        }
-    }
-    
-    // Если в комнате уже есть другой игрок, обновляем состояние
-    if (room.players.size === 2) {
-        room.gameState = 'placing';
-        console.log(`В комнате ${roomId} теперь 2 игрока, начинаем расстановку`);
-        
-        // Назначаем случайного игрока для первого хода
-        const firstPlayer = Array.from(room.players.values())[
-            Math.floor(Math.random() * 2)
-        ];
-        room.currentTurn = firstPlayer.id;
-        
-        console.log(`Первый ход у игрока ${firstPlayer.number}`);
-    }
-    
-    // Обработка сообщений от клиента
-    ws.on('message', (data) => {
-        try {
-            const message = JSON.parse(data);
-            console.log(`Сообщение от игрока ${playerId} (${playerNumber}):`, message.type);
-            handleClientMessage(room, playerId, message);
-        } catch (error) {
-            console.error('Ошибка обработки сообщения:', error);
-        }
-    });
-    
-    // Обработка отключения игрока
-    ws.on('close', () => {
-        console.log(`Игрок ${playerId} (${playerNumber}) отключился от комнаты ${roomId}`);
-        
-        const connectionInfo = connections.get(ws);
-        if (connectionInfo) {
-            const { roomId, playerId } = connectionInfo;
-            const room = rooms.get(roomId);
+            ws.playerId = playerId;
+            ws.roomId = null;
             
-            if (room) {
-                const disconnectedPlayer = room.players.get(playerId);
+            ws.on('message', (data) => {
+                try {
+                    const message = JSON.parse(data.toString());
+                    this.handleMessage(ws, message);
+                } catch (error) {
+                    console.error('❌ Ошибка парсинга сообщения:', error);
+                    this.sendError(ws, 'Invalid message format');
+                }
+            });
+            
+            ws.on('close', () => {
+                console.log(`🔌 Отключение: ${playerId}`);
+                this.handleDisconnect(playerId);
+            });
+            
+            // Отправляем ID игрока сразу после подключения
+            ws.send(JSON.stringify({
+                type: 'CONNECTION_ESTABLISHED',
+                playerId: playerId,
+                stats: this.playerStats.get(playerId)
+            }));
+        });
+    }
+    
+    handleMessage(ws, message) {
+        console.log(`📨 Сообщение от ${ws.playerId}:`, message.type);
+        
+        switch (message.type) {
+            case 'CREATE_ROOM':
+                this.createRoom(ws);
+                break;
+            case 'JOIN_ROOM':
+                this.joinRoom(ws, message.roomId, message.playerName);
+                break;
+            case 'PLAYER_READY':
+                this.handlePlayerReady(ws);
+                break;
+            case 'SHIPS_PLACED':
+                this.handleShipsPlaced(ws, message.ships);
+                break;
+            case 'FIRE_SHOT':
+                this.handleFireShot(ws, message.x, message.y);
+                break;
+            case 'USE_SUPER_WEAPON':
+                this.handleSuperWeapon(ws);
+                break;
+            case 'PLAYER_INFO':
+                this.handlePlayerInfo(ws, message);
+                break;
+            default:
+                console.log(`❓ Неизвестный тип сообщения: ${message.type}`);
+        }
+    }
+    
+    createRoom(ws) {
+        const roomId = Math.floor(1000 + Math.random() * 9000).toString();
+        const playerId = ws.playerId;
+        
+        const room = {
+            id: roomId,
+            players: new Map(),
+            gameState: 'waiting',
+            currentTurn: null,
+            boards: new Map(),
+            ships: new Map(),
+            readyPlayers: new Set(),
+            shipsPlaced: new Set()
+        };
+        
+        room.players.set(playerId, {
+            id: playerId,
+            ws: ws,
+            number: 1,
+            ready: false,
+            shipsPlaced: false,
+            board: null,
+            playerName: `Игрок 1`
+        });
+        
+        this.rooms.set(roomId, room);
+        ws.roomId = roomId;
+        
+        console.log(`🎮 Создана комната ${roomId} игроком ${playerId}`);
+        
+        ws.send(JSON.stringify({
+            type: MESSAGE_TYPES.ROOM_CREATED,
+            roomId: roomId,
+            playerNumber: 1,
+            playerId: playerId
+        }));
+    }
+    
+    joinRoom(ws, roomId, playerName) {
+        const playerId = ws.playerId;
+        
+        if (!this.rooms.has(roomId)) {
+            this.sendError(ws, 'Комната не найдена');
+            return;
+        }
+        
+        const room = this.rooms.get(roomId);
+        
+        if (room.players.size >= 2) {
+            this.sendError(ws, 'Комната заполнена');
+            return;
+        }
+        
+        if (room.gameState !== 'waiting') {
+            this.sendError(ws, 'Игра уже началась');
+            return;
+        }
+        
+        // Добавляем второго игрока
+        const playerNumber = 2;
+        room.players.set(playerId, {
+            id: playerId,
+            ws: ws,
+            number: playerNumber,
+            ready: false,
+            shipsPlaced: false,
+            board: null,
+            playerName: playerName || `Игрок ${playerNumber}`
+        });
+        
+        ws.roomId = roomId;
+        
+        console.log(`👥 Игрок ${playerId} присоединился к комнате ${roomId}`);
+        
+        // Отправляем подтверждение новому игроку
+        ws.send(JSON.stringify({
+            type: MESSAGE_TYPES.ROOM_JOINED,
+            roomId: roomId,
+            playerNumber: playerNumber,
+            playerId: playerId
+        }));
+        
+        // Уведомляем первого игрока о подключении второго
+        const firstPlayer = Array.from(room.players.values())[0];
+        if (firstPlayer.ws.readyState === WebSocket.OPEN) {
+            firstPlayer.ws.send(JSON.stringify({
+                type: MESSAGE_TYPES.PLAYER_CONNECTED,
+                playerNumber: playerNumber,
+                playerName: playerName || `Игрок ${playerNumber}`
+            }));
+        }
+        
+        // Отправляем информацию о комнате обоим игрокам
+        this.sendRoomInfo(room);
+        
+        // АВТОМАТИЧЕСКИ начинаем игру при подключении второго игрока
+        if (room.players.size === 2) {
+            this.startGame(room);
+        }
+    }
+    
+    startGame(room) {
+        console.log(`🎲 Начинаем игру в комнате ${room.id}`);
+        room.gameState = 'placing';
+        
+        // Выбираем случайного игрока для первого хода
+        const players = Array.from(room.players.values());
+        room.currentTurn = players[Math.floor(Math.random() * players.length)].id;
+        
+        // Уведомляем всех игроков о начале игры
+        room.players.forEach((player, playerId) => {
+            if (player.ws.readyState === WebSocket.OPEN) {
+                player.ws.send(JSON.stringify({
+                    type: MESSAGE_TYPES.GAME_START,
+                    yourTurn: room.currentTurn === playerId,
+                    roomId: room.id
+                }));
+            }
+        });
+        
+        // Даем 3 секунды на подготовку
+        setTimeout(() => {
+            this.checkAllShipsPlaced(room);
+        }, 3000);
+    }
+    
+    handlePlayerReady(ws) {
+        const room = this.getPlayerRoom(ws.playerId);
+        if (!room) return;
+        
+        const player = room.players.get(ws.playerId);
+        if (!player) return;
+        
+        player.ready = true;
+        room.readyPlayers.add(ws.playerId);
+        
+        console.log(`✅ Игрок ${ws.playerId} готов в комнате ${room.id}`);
+        
+        // Проверяем, готовы ли все игроки
+        if (room.readyPlayers.size === 2) {
+            console.log(`🎯 Все игроки готовы в комнате ${room.id}`);
+            
+            // Если еще не начали игру, начинаем
+            if (room.gameState === 'waiting') {
+                this.startGame(room);
+            }
+        }
+    }
+    
+    handleShipsPlaced(ws, ships) {
+        const room = this.getPlayerRoom(ws.playerId);
+        if (!room) return;
+        
+        const player = room.players.get(ws.playerId);
+        if (!player) return;
+        
+        player.ships = ships;
+        player.shipsPlaced = true;
+        room.shipsPlaced.add(ws.playerId);
+        
+        console.log(`🚢 Игрок ${ws.playerId} расставил корабли в комнате ${room.id}`);
+        
+        // Проверяем, все ли расставили корабли
+        this.checkAllShipsPlaced(room);
+    }
+    
+    checkAllShipsPlaced(room) {
+        if (room.shipsPlaced.size === 2 && room.gameState === 'placing') {
+            room.gameState = 'playing';
+            console.log(`⚔️ Все корабли расставлены, начинаем битву в ${room.id}`);
+            
+            // Уведомляем о начале хода
+            room.players.forEach((player, playerId) => {
+                if (player.ws.readyState === WebSocket.OPEN) {
+                    player.ws.send(JSON.stringify({
+                        type: MESSAGE_TYPES.PLAYER_TURN,
+                        yourTurn: room.currentTurn === playerId
+                    }));
+                }
+            });
+        }
+    }
+    
+    handleFireShot(ws, x, y) {
+        const room = this.getPlayerRoom(ws.playerId);
+        if (!room) return;
+        
+        if (room.gameState !== 'playing') {
+            this.sendError(ws, 'Игра еще не началась');
+            return;
+        }
+        
+        if (room.currentTurn !== ws.playerId) {
+            this.sendError(ws, 'Не ваш ход');
+            return;
+        }
+        
+        const attacker = room.players.get(ws.playerId);
+        const opponentId = this.getOpponentId(room, ws.playerId);
+        const opponent = room.players.get(opponentId);
+        
+        if (!opponent || !opponent.ships) {
+            this.sendError(ws, 'Противник не готов');
+            return;
+        }
+        
+        // Проверяем попадание
+        let hit = false;
+        let sunk = false;
+        let shipType = null;
+        
+        for (const ship of opponent.ships) {
+            for (const coord of ship.coordinates) {
+                if (coord.x === x && coord.y === y) {
+                    hit = true;
+                    shipType = ship.type;
+                    
+                    // Проверяем, потоплен ли корабль
+                    if (!ship.hits) ship.hits = new Set();
+                    ship.hits.add(`${x},${y}`);
+                    
+                    if (ship.hits.size === ship.coordinates.length) {
+                        sunk = true;
+                        ship.sunk = true;
+                    }
+                    break;
+                }
+            }
+            if (hit) break;
+        }
+        
+        // Меняем ход
+        room.currentTurn = opponentId;
+        
+        // Отправляем результат всем игрокам
+        room.players.forEach((player, playerId) => {
+            if (player.ws.readyState === WebSocket.OPEN) {
+                player.ws.send(JSON.stringify({
+                    type: MESSAGE_TYPES.SHOT_RESULT,
+                    x: x,
+                    y: y,
+                    hit: hit,
+                    sunk: sunk,
+                    shipType: shipType,
+                    playerId: ws.playerId,
+                    yourTurn: room.currentTurn === playerId
+                }));
+            }
+        });
+        
+        // Проверяем конец игры
+        this.checkGameOver(room, opponent);
+    }
+    
+    handleSuperWeapon(ws) {
+        const room = this.getPlayerRoom(ws.playerId);
+        if (!room) return;
+        
+        const playerStats = this.playerStats.get(ws.playerId);
+        
+        if (!playerStats.superWeapon) {
+            this.sendError(ws, 'Супер-оружие недоступно');
+            return;
+        }
+        
+        // Используем супер-оружие
+        playerStats.superWeapon = false;
+        
+        const opponentId = this.getOpponentId(room, ws.playerId);
+        const opponent = room.players.get(opponentId);
+        
+        // Помечаем все корабли противника как потопленные
+        if (opponent.ships) {
+            opponent.ships.forEach(ship => {
+                ship.sunk = true;
+                ship.hits = new Set(ship.coordinates.map(c => `${c.x},${c.y}`));
+            });
+        }
+        
+        // Конец игры
+        this.endGame(room, ws.playerId, 'nuclear');
+    }
+    
+    checkGameOver(room, opponent) {
+        if (!opponent.ships) return;
+        
+        const allSunk = opponent.ships.every(ship => ship.sunk);
+        
+        if (allSunk) {
+            const winnerId = this.getOpponentId(room, opponent.id);
+            this.endGame(room, winnerId, 'all_ships_sunk');
+        }
+    }
+    
+    endGame(room, winnerId, reason) {
+        room.gameState = 'finished';
+        
+        // Обновляем статистику
+        room.players.forEach((player, playerId) => {
+            const stats = this.playerStats.get(playerId);
+            if (!stats) return;
+            
+            stats.totalGames++;
+            
+            if (playerId === winnerId) {
+                stats.wins++;
                 
-                // Уведомляем оппонента об отключении
-                room.players.forEach((p, id) => {
-                    if (id !== playerId && p.ws.readyState === WebSocket.OPEN) {
-                        p.ws.send(JSON.stringify({
-                            type: MESSAGE_TYPES.PLAYER_DISCONNECTED,
-                            playerNumber: disconnectedPlayer?.number || playerNumber,
-                            playerName: disconnectedPlayer?.playerName || `Игрок ${playerNumber}`
+                // Проверяем, достиг ли игрок 10 побед
+                if (stats.wins >= 10 && !stats.superWeapon) {
+                    stats.superWeapon = true;
+                }
+            } else {
+                stats.losses++;
+            }
+            
+            this.playerStats.set(playerId, stats);
+        });
+        
+        // Уведомляем всех игроков
+        room.players.forEach((player, playerId) => {
+            if (player.ws.readyState === WebSocket.OPEN) {
+                player.ws.send(JSON.stringify({
+                    type: MESSAGE_TYPES.GAME_OVER,
+                    winnerId: winnerId,
+                    reason: reason,
+                    stats: this.playerStats.get(playerId)
+                }));
+            }
+        });
+        
+        // Чистим комнату через 30 секунд
+        setTimeout(() => {
+            if (this.rooms.has(room.id)) {
+                this.rooms.delete(room.id);
+                console.log(`🧹 Очищена комната ${room.id}`);
+            }
+        }, 30000);
+    }
+    
+    handlePlayerInfo(ws, message) {
+        const room = this.getPlayerRoom(ws.playerId);
+        if (!room) return;
+        
+        const player = room.players.get(ws.playerId);
+        if (!player) return;
+        
+        player.playerName = message.playerName || player.playerName;
+        
+        // Уведомляем других игроков
+        room.players.forEach((p, id) => {
+            if (id !== ws.playerId && p.ws.readyState === WebSocket.OPEN) {
+                p.ws.send(JSON.stringify({
+                    type: MESSAGE_TYPES.PLAYER_INFO,
+                    playerNumber: player.number,
+                    playerName: player.playerName
+                }));
+            }
+        });
+    }
+    
+    sendRoomInfo(room) {
+        const playersInfo = Array.from(room.players.values()).map(p => ({
+            playerNumber: p.number,
+            playerName: p.playerName,
+            ready: p.ready,
+            shipsPlaced: p.shipsPlaced
+        }));
+        
+        room.players.forEach((player) => {
+            if (player.ws.readyState === WebSocket.OPEN) {
+                player.ws.send(JSON.stringify({
+                    type: MESSAGE_TYPES.ROOM_INFO,
+                    roomId: room.id,
+                    players: playersInfo,
+                    gameState: room.gameState
+                }));
+            }
+        });
+    }
+    
+    getPlayerRoom(playerId) {
+        for (const [roomId, room] of this.rooms) {
+            if (room.players.has(playerId)) {
+                return room;
+            }
+        }
+        return null;
+    }
+    
+    getOpponentId(room, playerId) {
+        for (const [id, player] of room.players) {
+            if (id !== playerId) {
+                return id;
+            }
+        }
+        return null;
+    }
+    
+    handleDisconnect(playerId) {
+        for (const [roomId, room] of this.rooms) {
+            if (room.players.has(playerId)) {
+                console.log(`💥 Игрок ${playerId} отключился из комнаты ${roomId}`);
+                
+                // Уведомляем другого игрока
+                room.players.forEach((player, id) => {
+                    if (id !== playerId && player.ws.readyState === WebSocket.OPEN) {
+                        player.ws.send(JSON.stringify({
+                            type: MESSAGE_TYPES.ERROR,
+                            message: 'Противник отключился'
                         }));
                     }
                 });
                 
-                // Удаляем игрока из комнаты
-                room.players.delete(playerId);
-                room.boards.delete(playerId);
-                room.shots.delete(playerId);
-                room.specialWeapons.delete(playerId);
-                
-                // Если комната пуста, удаляем её
-                if (room.players.size === 0) {
-                    rooms.delete(roomId);
-                    console.log(`Комната ${roomId} удалена (нет игроков)`);
-                } else {
-                    // Если остался только один игрок, меняем состояние
-                    if (room.players.size === 1) {
-                        room.gameState = 'waiting';
-                        console.log(`В комнате ${roomId} остался 1 игрок, возвращаем в состояние ожидания`);
-                    }
-                }
-            }
-        }
-        
-        connections.delete(ws);
-    });
-    
-    ws.on('error', (error) => {
-        console.error('WebSocket ошибка:', error);
-    });
-});
-
-function handleClientMessage(room, playerId, message) {
-    const player = room.players.get(playerId);
-    if (!player) return;
-    
-    switch (message.type) {
-        case 'PLAYER_INFO':
-            // Игрок отправляет информацию о себе
-            if (message.playerName) {
-                player.playerName = message.playerName;
-            }
-            console.log(`Игрок ${playerId} (${player.number}) отправил информацию: ${player.playerName}`);
-            
-            // Отправляем обновленную информацию всем игрокам
-            room.players.forEach((p, id) => {
-                if (p.ws.readyState === WebSocket.OPEN && id !== playerId) {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.PLAYER_CONNECTED,
-                        playerNumber: player.number,
-                        playerName: player.playerName
-                    }));
-                }
-            });
-            
-            // Если в комнате уже есть 2 игрока, начинаем игру
-            if (room.players.size === 2 && room.gameState === 'waiting') {
-                room.gameState = 'placing';
-                
-                // Назначаем случайного игрока для первого хода
-                const firstPlayer = Array.from(room.players.values())[
-                    Math.floor(Math.random() * 2)
-                ];
-                room.currentTurn = firstPlayer.id;
-                
-                // Уведомляем обоих игроков о начале игры
-                room.players.forEach((p, id) => {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.GAME_START,
-                        yourTurn: room.currentTurn === id
-                    }));
-                });
-                
-                console.log(`Игра начинается в комнате ${room.id}, первый ход у игрока ${firstPlayer.number}`);
-            }
-            break;
-            
-        case 'PLAYER_READY':
-            // Игрок готов начать игру
-            player.ready = true;
-            console.log(`Игрок ${playerId} (${player.number}) готов`);
-            
-            // Проверяем, все ли игроки готовы
-            const allReady = Array.from(room.players.values())
-                .every(p => p.ready);
-            
-            if (allReady && room.players.size === 2 && room.gameState === 'waiting') {
-                // Начинаем расстановку кораблей
-                room.gameState = 'placing';
-                
-                // Назначаем случайного игрока для первого хода
-                const firstPlayer = Array.from(room.players.values())[
-                    Math.floor(Math.random() * 2)
-                ];
-                room.currentTurn = firstPlayer.id;
-                
-                room.players.forEach((p, id) => {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.GAME_START,
-                        yourTurn: room.currentTurn === id
-                    }));
-                });
-                
-                console.log(`Все игроки готовы, начинаем расстановку в комнате ${room.id}`);
-            }
-            break;
-            
-        case 'SHIPS_PLACED':
-            player.ships = message.ships;
-            player.shipsPlaced = true;
-            console.log(`Игрок ${playerId} (${player.number}) расставил корабли`);
-            
-            // Проверяем, все ли игроки расставили корабли
-            const allShipsPlaced = Array.from(room.players.values())
-                .every(p => p.shipsPlaced);
-            
-            if (allShipsPlaced && room.gameState === 'placing') {
-                room.gameState = 'playing';
-                console.log(`Все корабли расставлены, начинаем битву в комнате ${room.id}`);
-                
-                // Уведомляем о начале боя
-                room.players.forEach((p, id) => {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.PLAYER_TURN,
-                        yourTurn: room.currentTurn === id
-                    }));
-                });
-            }
-            break;
-            
-        case 'SHOT':
-            if (room.gameState !== 'playing' || room.currentTurn !== playerId) {
-                console.log(`Неверный ход от игрока ${playerId}, сейчас ход игрока ${room.currentTurn}`);
-                return;
-            }
-            
-            const { x, y, weapon } = message;
-            console.log(`Игрок ${playerId} (${player.number}) стреляет в (${x}, ${y}) оружием: ${weapon || 'обычный'}`);
-            
-            const opponentId = Array.from(room.players.keys())
-                .find(id => id !== playerId);
-            
-            if (!opponentId) {
-                console.error('Не найден оппонент');
-                return;
-            }
-            
-            const opponent = room.players.get(opponentId);
-            const opponentBoard = room.boards.get(opponentId);
-            const playerShots = room.shots.get(playerId);
-            
-            // Обработка специального оружия
-            if (weapon === 'bomb' && player.specialWeapons.bomb > 0) {
-                // Бомба бьет по площади 3x3
-                const hits = [];
-                for (let dx = -1; dx <= 1; dx++) {
-                    for (let dy = -1; dy <= 1; dy++) {
-                        const tx = x + dx;
-                        const ty = y + dy;
-                        if (tx >= 0 && tx < 10 && ty >= 0 && ty < 10) {
-                            const hit = processShot(
-                                opponentBoard, 
-                                playerShots, 
-                                opponent.ships, 
-                                tx, ty
-                            );
-                            hits.push({ x: tx, y: ty, ...hit });
-                        }
-                    }
-                }
-                player.specialWeapons.bomb--;
-                
-                room.players.forEach((p, id) => {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.SPECIAL_WEAPON_USED,
-                        playerNumber: player.number,
-                        playerName: player.playerName,
-                        weapon: 'bomb',
-                        hits,
-                        remaining: player.specialWeapons
-                    }));
-                });
-                
-                console.log(`Игрок ${player.number} использовал бомбу, осталось: ${player.specialWeapons.bomb}`);
-                
-            } else if (weapon === 'radar' && player.specialWeapons.radar > 0) {
-                // Радар показывает наличие кораблей в области 3x3 без атаки
-                const radarResults = [];
-                for (let dx = -1; dx <= 1; dx++) {
-                    for (let dy = -1; dy <= 1; dy++) {
-                        const tx = x + dx;
-                        const ty = y + dy;
-                        if (tx >= 0 && tx < 10 && ty >= 0 && ty < 10) {
-                            const hasShip = opponent.ships.some(ship =>
-                                ship.cells.some(cell =>
-                                    cell.x === tx && cell.y === ty
-                                )
-                            );
-                            radarResults.push({ x: tx, y: ty, hasShip });
-                        }
-                    }
-                }
-                player.specialWeapons.radar--;
-                
-                room.players.forEach((p, id) => {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.SPECIAL_WEAPON_USED,
-                        playerNumber: player.number,
-                        playerName: player.playerName,
-                        weapon: 'radar',
-                        results: radarResults,
-                        remaining: player.specialWeapons
-                    }));
-                });
-                
-                // После радара ход переходит оппоненту
-                room.currentTurn = opponentId;
-                console.log(`Игрок ${player.number} использовал радар, ход переходит игроку ${opponent.number}`);
-                
-            } else {
-                // Обычный выстрел
-                const result = processShot(
-                    opponentBoard, 
-                    playerShots, 
-                    opponent.ships, 
-                    x, y
-                );
-                
-                console.log(`Результат выстрела: ${result.hit ? 'попадание' : 'промах'} ${result.sunk ? ', корабль потоплен' : ''}`);
-                
-                // Отправляем результат обоим игрокам
-                room.players.forEach((p, id) => {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.SHOT_RESULT,
-                        playerNumber: player.number,
-                        playerName: player.playerName,
-                        x, y,
-                        hit: result.hit,
-                        sunk: result.sunk,
-                        shipCells: result.shipCells,
-                        nextTurn: room.currentTurn === id
-                    }));
-                });
-            }
-            
-            // Проверяем победу
-            if (checkWinCondition(opponent.ships, playerShots)) {
-                room.gameState = 'finished';
-                console.log(`Игрок ${player.number} победил в комнате ${room.id}`);
-                
-                room.players.forEach((p, id) => {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.GAME_OVER,
-                        winner: player.number,
-                        winnerName: player.playerName,
-                        playerNumber: p.number,
-                        shots: room.shots.get(id)
-                    }));
-                });
-            } else if (!weapon || weapon === 'normal') {
-                // Меняем ход (если это был не радар)
-                room.currentTurn = opponentId;
-                console.log(`Ход переходит игроку ${opponent.number}`);
-                
-                room.players.forEach((p, id) => {
-                    p.ws.send(JSON.stringify({
-                        type: MESSAGE_TYPES.PLAYER_TURN,
-                        yourTurn: room.currentTurn === id
-                    }));
-                });
-            }
-            break;
-            
-        case 'CHAT':
-            // Сохраняем сообщение в историю чата
-            const chatMessage = {
-                type: MESSAGE_TYPES.CHAT_MESSAGE,
-                playerNumber: player.number,
-                playerName: player.playerName,
-                message: message.message,
-                timestamp: new Date().toISOString()
-            };
-            
-            room.chatHistory.push(chatMessage);
-            
-            // Ограничиваем историю до 100 сообщений
-            if (room.chatHistory.length > 100) {
-                room.chatHistory = room.chatHistory.slice(-100);
-            }
-            
-            // Пересылаем сообщение всем в комнате
-            room.players.forEach((p, id) => {
-                if (p.ws.readyState === WebSocket.OPEN) {
-                    p.ws.send(JSON.stringify(chatMessage));
-                }
-            });
-            
-            console.log(`Чат от игрока ${player.number} (${player.playerName}): ${message.message}`);
-            break;
-            
-        case 'REMATCH_REQUEST':
-            // Отправляем запрос на реванш оппоненту
-            const opponentIdRematch = Array.from(room.players.keys())
-                .find(id => id !== playerId);
-            
-            if (opponentIdRematch) {
-                const opponent = room.players.get(opponentIdRematch);
-                opponent.ws.send(JSON.stringify({
-                    type: 'REMATCH_REQUEST',
-                    playerNumber: player.number,
-                    playerName: player.playerName
-                }));
-                
-                console.log(`Игрок ${player.number} запросил реванш`);
-            }
-            break;
-            
-        case 'REMATCH_ACCEPT':
-            // Сбрасываем игру для реванша
-            resetRoomForRematch(room);
-            console.log(`Реванш принят в комнате ${room.id}`);
-            break;
-            
-        default:
-            console.log(`Неизвестный тип сообщения от игрока ${playerId}:`, message.type);
-    }
-}
-
-function processShot(board, shots, ships, x, y) {
-    const cell = board[y][x];
-    let hit = false;
-    let sunk = false;
-    let shipCells = [];
-    
-    if (cell === 1) { // Корабль
-        hit = true;
-        shots[y][x] = 2; // Помечаем как попадание
-        
-        // Находим корабль, в который попали
-        for (const ship of ships) {
-            const hitCell = ship.cells.find(c => c.x === x && c.y === y);
-            if (hitCell) {
-                // Помечаем клетку как подбитую
-                hitCell.hit = true;
-                
-                // Проверяем, потоплен ли корабль
-                if (ship.cells.every(c => c.hit)) {
-                    sunk = true;
-                    shipCells = ship.cells;
-                    
-                    // Автоматически отмечаем клетки вокруг потопленного корабля
-                    markAroundShip(shots, ship);
-                }
+                // Удаляем комнату
+                this.rooms.delete(roomId);
                 break;
             }
         }
-    } else {
-        shots[y][x] = 3; // Помечаем как промах
     }
     
-    return { hit, sunk, shipCells };
-}
-
-function markAroundShip(shots, ship) {
-    const marked = new Set();
-    
-    for (const cell of ship.cells) {
-        for (let dx = -1; dx <= 1; dx++) {
-            for (let dy = -1; dy <= 1; dy++) {
-                const x = cell.x + dx;
-                const y = cell.y + dy;
-                
-                if (x >= 0 && x < 10 && y >= 0 && y < 10) {
-                    const key = `${x},${y}`;
-                    if (!marked.has(key) && shots[y][x] === 0) {
-                        shots[y][x] = 4; // Помечаем как проверенную пустую
-                        marked.add(key);
-                    }
-                }
-            }
+    sendError(ws, message) {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: MESSAGE_TYPES.ERROR,
+                message: message
+            }));
         }
     }
 }
 
-function checkWinCondition(ships, shots) {
-    // Все клетки всех кораблей должны быть подбиты
-    return ships.every(ship =>
-        ship.cells.every(cell => {
-            const shot = shots[cell.y][cell.x];
-            return shot === 2; // Помечено как попадание
-        })
-    );
-}
+// Запуск сервера
+const PORT = process.env.PORT || 8080;
+const server = new GameServer(PORT);
 
-function resetRoomForRematch(room) {
-    room.gameState = 'placing';
-    room.currentTurn = Array.from(room.players.values())[
-        Math.floor(Math.random() * 2)
-    ].id;
-    
-    // Сбрасываем состояние игроков
-    room.players.forEach(player => {
-        player.ready = false;
-        player.ships = [];
-        player.shipsPlaced = false;
-        player.specialWeapons = {
-            bomb: 2,
-            radar: 1
-        };
-    });
-    
-    // Сбрасываем доски
-    room.boards.clear();
-    room.shots.clear();
-    room.specialWeapons.clear();
-    
-    room.players.forEach((p, id) => {
-        room.boards.set(id, createEmptyBoard());
-        room.shots.set(id, createEmptyBoard());
-        room.specialWeapons.set(id, { ...p.specialWeapons });
-    });
-    
-    // Очищаем историю чата для новой игры
-    room.chatHistory = [];
-    
-    // Уведомляем игроков
-    room.players.forEach((p, id) => {
-        p.ws.send(JSON.stringify({
-            type: MESSAGE_TYPES.GAME_START,
-            yourTurn: room.currentTurn === id,
-            rematch: true
-        }));
-    });
-}
-
-function createEmptyBoard() {
-    return Array(10).fill().map(() => Array(10).fill(0));
-}
-
-function generateRoomId() {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
-}
-
-function generatePlayerId() {
-    return Math.random().toString(36).substring(2, 10);
-}
-
-// Запускаем сервер на порту, который предоставляет Render
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`✅ Сервер запущен на порту ${PORT}`);
-    console.log(`✅ HTTP и WebSocket работают на одном порту`);
-    console.log(`✅ Доступные файлы: index.html, style.css, game.js`);
-    console.log(`✅ Готов к подключению игроков`);
-    console.log(`✅ Поддержка чата включена`);
+server.server.listen(PORT, () => {
+    console.log(`🚀 Сервер запущен на порту ${PORT}`);
+    console.log(`📊 API статистики: http://localhost:${PORT}/api/stats`);
+    console.log(`❤️  Health check: http://localhost:${PORT}/health`);
 });
-
-// Экспортируем для тестирования
-module.exports = { server, rooms, connections };
